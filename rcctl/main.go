@@ -1,0 +1,242 @@
+// rcctl: tailnet-only control page for the claude-gw Remote Control servers (phase 3a).
+//
+// Panels: servers, health, logs. Actions: restart a profile's server, run rc-update.
+// Tailscale identity is the authentication: a caller must be an untagged node whose login is
+// in RCCTL_ALLOW. Runs as the unprivileged rcctl user; actions go through sudo rules limited
+// to exact commands (systemd/sudoers.d/claude-rc), and each one is logged with the caller.
+package main
+
+import (
+	"context"
+	"embed"
+	"fmt"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"tailscale.com/tsnet"
+)
+
+const (
+	wantsDir = "/etc/systemd/system/multi-user.target.wants"
+	etcDir   = "/etc/claude-rc"
+)
+
+var unitRE = regexp.MustCompile(`^claude-rc@([a-z0-9-]+)\.service$`)
+
+//go:embed page.html
+var pageFS embed.FS
+var page = template.Must(template.ParseFS(pageFS, "page.html"))
+
+type app struct {
+	allow map[string]bool
+	// whois returns the caller's Tailscale login and whether its node is tagged.
+	whois func(ctx context.Context, remoteAddr string) (login string, tagged bool, err error)
+	run   func(ctx context.Context, name string, args ...string) (string, error)
+	wants string
+	etc   string
+}
+
+type server struct {
+	Profile, Active, Since, Restarts, Memory string
+}
+
+func run(ctx context.Context, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(out), err
+}
+
+// profiles lists enabled claude-rc@ instances, as rc-health does: list-unit-files omits them.
+func (a *app) profiles() []string {
+	entries, _ := os.ReadDir(a.wants)
+	var ps []string
+	for _, e := range entries {
+		if m := unitRE.FindStringSubmatch(e.Name()); m != nil {
+			ps = append(ps, m[1])
+		}
+	}
+	return ps
+}
+
+func (a *app) isProfile(p string) bool {
+	for _, q := range a.profiles() {
+		if p == q {
+			return true
+		}
+	}
+	return false
+}
+
+func parseShow(s string) map[string]string {
+	kv := map[string]string{}
+	for _, line := range strings.Split(s, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			kv[k] = v
+		}
+	}
+	return kv
+}
+
+func mib(bytes string) string {
+	n, err := strconv.ParseUint(bytes, 10, 64)
+	if err != nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d MiB", n>>20)
+}
+
+func (a *app) server(ctx context.Context, p string) server {
+	out, _ := a.run(ctx, "systemctl", "show", "-p", "ActiveState,SubState,ActiveEnterTimestamp,NRestarts,MemoryCurrent", "claude-rc@"+p+".service")
+	kv := parseShow(out)
+	return server{
+		Profile:  p,
+		Active:   kv["ActiveState"] + " (" + kv["SubState"] + ")",
+		Since:    kv["ActiveEnterTimestamp"],
+		Restarts: kv["NRestarts"],
+		Memory:   mib(kv["MemoryCurrent"]),
+	}
+}
+
+func (a *app) file(name string) string {
+	b, err := os.ReadFile(a.etc + "/" + name)
+	if err != nil {
+		return "?"
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func (a *app) journal(ctx context.Context, unit string, n int) string {
+	out, _ := a.run(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(n), "-o", "short-iso", "--no-pager")
+	return out
+}
+
+// auth admits untagged nodes whose login is allowed; actions also need the X-Rcctl header,
+// which a cross-site form or link cannot send.
+func (a *app) auth(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		login, tagged, err := a.whois(r.Context(), r.RemoteAddr)
+		if err != nil || tagged || !a.allow[login] {
+			log.Printf("denied %s %s from %s (login=%q tagged=%v err=%v)", r.Method, r.URL.Path, r.RemoteAddr, login, tagged, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet && r.Header.Get("X-Rcctl") != "1" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r, login)
+	}
+}
+
+func (a *app) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", a.auth(a.index))
+	mux.HandleFunc("GET /logs/{profile}", a.auth(a.logs))
+	mux.HandleFunc("POST /restart/{profile}", a.auth(a.restart))
+	mux.HandleFunc("POST /update", a.auth(a.update))
+	return mux
+}
+
+func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
+	var servers []server
+	for _, p := range a.profiles() {
+		servers = append(servers, a.server(r.Context(), p))
+	}
+	data := map[string]any{
+		"Login":    login,
+		"Servers":  servers,
+		"Tag":      a.file("DEPLOYED_TAG"),
+		"Claude":   a.file("CLAUDE_VERSION"),
+		"Health":   a.journal(r.Context(), "claude-rc-health.service", 12),
+		"Update":   a.journal(r.Context(), "claude-rc-update.service", 12),
+		"Rendered": time.Now().Format(time.RFC3339),
+	}
+	if err := page.Execute(w, data); err != nil {
+		log.Printf("render: %v", err)
+	}
+}
+
+func (a *app) logs(w http.ResponseWriter, r *http.Request, _ string) {
+	p := r.PathValue("profile")
+	if !a.isProfile(p) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprint(w, a.journal(r.Context(), "claude-rc@"+p+".service", 300))
+}
+
+// sudo -n runs only the exact commands in the sudoers file; anything else fails at once.
+func (a *app) action(w http.ResponseWriter, r *http.Request, login, what string, args ...string) {
+	out, err := a.run(r.Context(), "sudo", append([]string{"-n"}, args...)...)
+	log.Printf("action=%q by=%s from=%s err=%v", what, login, r.RemoteAddr, err)
+	if err != nil {
+		http.Error(w, strings.TrimSpace(out), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "%s: ok\n", what)
+}
+
+func (a *app) restart(w http.ResponseWriter, r *http.Request, login string) {
+	p := r.PathValue("profile")
+	if !a.isProfile(p) {
+		http.NotFound(w, r)
+		return
+	}
+	a.action(w, r, login, "restart "+p, "/usr/bin/systemctl", "restart", "claude-rc@"+p+".service")
+}
+
+// The update runs as its own oneshot unit (about a minute with the health wait); follow it in
+// the Update panel.
+func (a *app) update(w http.ResponseWriter, r *http.Request, login string) {
+	a.action(w, r, login, "rc-update", "/usr/bin/systemctl", "start", "--no-block", "claude-rc-update.service")
+}
+
+func main() {
+	allow := map[string]bool{}
+	for _, l := range strings.Split(os.Getenv("RCCTL_ALLOW"), ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			allow[l] = true
+		}
+	}
+	if len(allow) == 0 {
+		log.Fatal("RCCTL_ALLOW is empty: set the Tailscale logins allowed to use rcctl in /etc/default/rcctl")
+	}
+	dir := os.Getenv("STATE_DIRECTORY") // set by systemd StateDirectory=
+	if dir == "" {
+		dir = "/var/lib/rcctl"
+	}
+	s := &tsnet.Server{Hostname: "claude-gw-ctl", Dir: dir}
+	defer s.Close()
+	lc, err := s.LocalClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+	ln, err := s.ListenTLS("tcp", ":443")
+	if err != nil {
+		log.Fatal(err)
+	}
+	a := &app{
+		allow: allow,
+		whois: func(ctx context.Context, addr string) (string, bool, error) {
+			res, err := lc.WhoIs(ctx, addr)
+			if err != nil {
+				return "", false, err
+			}
+			return res.UserProfile.LoginName, res.Node.IsTagged(), nil
+		},
+		run:   run,
+		wants: wantsDir,
+		etc:   etcDir,
+	}
+	log.Printf("rcctl listening on https://claude-gw-ctl (tailnet); allowed: %d login(s)", len(allow))
+	log.Fatal(http.Serve(ln, a.routes()))
+}

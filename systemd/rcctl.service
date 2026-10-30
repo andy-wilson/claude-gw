@@ -1,0 +1,25 @@
+[Unit]
+Description=rcctl control page for claude-gw (tailnet only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rcctl
+# Logs and the health and update panels come from the journal.
+SupplementaryGroups=systemd-journal
+# RCCTL_ALLOW: Tailscale logins allowed to use the page. Opt-in: no file, no start.
+EnvironmentFile=/etc/default/rcctl
+# tsnet otherwise uploads its logs to Tailscale.
+Environment=TS_NO_LOGS_NO_SUPPORT=true
+ExecStart=/usr/local/bin/rcctl
+StateDirectory=rcctl
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=10
+# No NoNewPrivileges: restart and update go through sudo (systemd/sudoers.d/claude-rc).
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

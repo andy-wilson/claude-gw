@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>claude-gw control</title>
+<style>
+  :root { --bg: #f7f7f8; --fg: #1d1d20; --muted: #6b6b73; --card: #fff; --line: #e2e2e6; --ok: #1a7f37; --bad: #c62828; --btn: #2f5bd3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16171b; --fg: #e8e8ec; --muted: #9a9aa3; --card: #202127; --line: #33343c; --ok: #4cc26a; --bad: #ef6b6b; --btn: #5b82f0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; }
+  header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 14px; }
+  .server { border-top: 1px solid var(--line); padding: 10px 0; display: grid; gap: 4px; }
+  .server:first-of-type { border-top: 0; }
+  .state-active { color: var(--ok); font-weight: 600; }
+  .state-other { color: var(--bad); font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button, a.button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--btn); background: transparent; color: var(--btn); text-decoration: none; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  pre { margin: 0; overflow-x: auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+  #msg { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>claude-gw</h1>
+    <span class="muted">{{.Login}} · {{.Rendered}}</span>
+  </header>
+  <p id="msg" class="muted"></p>
+
+  <section>
+    <h2>Servers</h2>
+    {{range .Servers}}
+    <div class="server">
+      <div class="row"><strong>{{.Profile}}</strong>
+        <span class="{{if eq .Active "active (running)"}}state-active{{else}}state-other{{end}}">{{.Active}}</span></div>
+      <div class="muted">since {{.Since}} · restarts {{.Restarts}} · {{.Memory}}</div>
+      <div class="row">
+        <button data-post="/restart/{{.Profile}}" data-confirm="Restart {{.Profile}}? Sessions on it reconnect.">Restart</button>
+        <a class="button" href="/logs/{{.Profile}}">Logs</a>
+      </div>
+    </div>
+    {{else}}
+    <p class="muted">No enabled claude-rc@ servers.</p>
+    {{end}}
+  </section>
+
+  <section>
+    <h2>Health</h2>
+    <p class="muted">Deployed {{.Tag}} · Claude Code {{.Claude}}</p>
+    <pre>{{.Health}}</pre>
+  </section>
+
+  <section>
+    <h2>Update</h2>
+    <div class="row"><button data-post="/update" data-confirm="Run rc-update? It restarts every server and reverts if they come back unhealthy.">Run rc-update</button></div>
+    <pre>{{.Update}}</pre>
+  </section>
+</main>
+<script>
+  document.querySelectorAll("button[data-post]").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm(b.dataset.confirm)) return;
+    const msg = document.getElementById("msg");
+    b.disabled = true;
+    try {
+      const r = await fetch(b.dataset.post, { method: "POST", headers: { "X-Rcctl": "1" } });
+      msg.textContent = (await r.text()).trim();
+      if (r.ok) setTimeout(() => location.reload(), 3000);
+    } catch (e) { msg.textContent = String(e); }
+    b.disabled = false;
+  }));
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@
 #   make rollback             redeploy the previously deployed tag
 #   make status               what is deployed, unit states, last health
 #   make verify               shellcheck + systemd-analyze verify, no changes
+#   make rcctl                build dist/rcctl (on a machine with docker) and record its sha256
 #
 # Rules enforced here (design: Change control and rollback):
 #   - working tree must be clean
@@ -23,8 +24,9 @@ UNIT_DIR    := /etc/systemd/system
 PROFILES    ?= $(shell ls /etc/claude-rc/*.env 2>/dev/null | xargs -rn1 basename | sed 's/\.env$$//')
 DEPLOYED    := /etc/claude-rc/DEPLOYED_TAG
 PREVIOUS    := /etc/claude-rc/PREVIOUS_TAG
+GO_IMAGE    := golang:1.27.3-bookworm
 
-.PHONY: deploy rollback status verify _preflight _install _restart bootstrap
+.PHONY: deploy rollback status verify rcctl _preflight _install _restart bootstrap
 
 deploy:
 	@if [ -n "$$(git status --porcelain)" ]; then echo "refusing: working tree is dirty"; exit 1; fi
@@ -47,6 +49,16 @@ _install:
 	                systemd/claude-rc-health.service systemd/claude-rc-health.timer \
 	                systemd/claude-rc-update.service systemd/claude-rc-update.timer $(UNIT_DIR)/
 	install -m 0440 systemd/sudoers.d/claude-rc /etc/sudoers.d/claude-rc
+	# Traverse-only: rcctl reads DEPLOYED_TAG and CLAUDE_VERSION by name; the env files stay 0600.
+	chmod 0751 /etc/claude-rc
+	if [ -f dist/rcctl ]; then
+	  (cd dist && sha256sum -c --quiet ../rcctl/rcctl.sha256) || { echo "refusing: dist/rcctl does not match rcctl/rcctl.sha256"; exit 1; }
+	  id -u rcctl >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin rcctl
+	  install -m 0755 dist/rcctl $(PREFIX)/bin/
+	  install -m 0644 systemd/rcctl.service $(UNIT_DIR)/
+	else
+	  echo "no dist/rcctl: control page not installed (make rcctl builds it)"
+	fi
 	# Root-only dirs: profiles get their own pre-created log file and nothing else (no squatting, no symlinks).
 	chown root:root /var/log/claude-rc $(STATE_DIR); chmod 0755 /var/log/claude-rc; chmod 0700 $(STATE_DIR)
 	find $(STATE_DIR) -mindepth 1 \( ! -user root -o ! -type f \) -delete
@@ -72,6 +84,8 @@ _restart:
 	  systemctl enable claude-rc@$$p
 	  systemctl restart claude-rc@$$p
 	done
+	# Opt-in: only restarted if already enabled and running (systemctl enable --now rcctl).
+	systemctl try-restart rcctl 2>/dev/null || true
 	sleep 3; systemctl --no-pager --plain status 'claude-rc@*' | head -n 40 || true
 
 rollback:
@@ -89,6 +103,13 @@ verify:
 	if command -v shellcheck >/dev/null; then shellcheck -S warning bin/* bootstrap/*.sh proxmox/*.sh profiles/hooks/*.sh; else echo "shellcheck not installed"; fi
 	if command -v systemd-analyze >/dev/null; then systemd-analyze verify systemd/*.service systemd/*.timer; else echo "systemd-analyze not installed, units not checked"; fi
 	jq . profiles/settings.json >/dev/null && echo "settings.json ok"
+	if command -v go >/dev/null; then (cd rcctl && go vet ./... && go test ./...); else echo "go not installed, rcctl not checked"; fi
+
+rcctl:
+	# Reproducible: same source and image, same sha256. Commit rcctl/rcctl.sha256 with the release.
+	docker run --rm -v "$(CURDIR)":/src -v rcctl-gomod:/go/pkg/mod -w /src/rcctl -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -e GOFLAGS=-mod=readonly \
+	  $(GO_IMAGE) go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /src/dist/rcctl .
+	cd dist && shasum -a 256 rcctl > ../rcctl/rcctl.sha256 && cat ../rcctl/rcctl.sha256
 
 bootstrap:
 	bash bootstrap/bootstrap.sh

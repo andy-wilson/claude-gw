@@ -1,0 +1,3 @@
+# /etc/default/rcctl: copy here (root:root 0644) to use the rcctl control page.
+# Tailscale login names allowed to use it, comma-separated. Tagged nodes are always refused.
+RCCTL_ALLOW=you@example.com
