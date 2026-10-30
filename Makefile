@@ -26,13 +26,15 @@ PREVIOUS    := /etc/claude-rc/PREVIOUS_TAG
 
 .PHONY: deploy rollback status verify _preflight _install _restart bootstrap
 
-deploy: _preflight _install _restart
-	@echo "deployed $$(cat $(DEPLOYED)) for profiles: $(PROFILES)"
+deploy:
+	@if [ -n "$$(git status --porcelain)" ]; then echo "refusing: working tree is dirty"; exit 1; fi
+	if [ -n "$(TAG)" ]; then git fetch -q --tags || true; git checkout -q "$(TAG)"; fi
+	# Fresh make: the install recipes must come from the Makefile at the tag, not the one make already parsed.
+	$(MAKE) --no-print-directory _preflight _install _restart TAG=
+	echo "deployed $$(cat $(DEPLOYED)) for profiles: $(PROFILES)"
 
 _preflight:
-	@if [ -n "$$(git status --porcelain)" ]; then echo "refusing: working tree is dirty"; exit 1; fi
-	if grep -lE '^[A-Za-z_]+=[^#]*[[:space:]]#' /etc/claude-rc/*.env 2>/dev/null; then echo "refusing: inline # comment in the env file(s) above; systemd keeps it in the value"; exit 1; fi
-	if [ -n "$(TAG)" ]; then git fetch -q --tags || true; git checkout -q "$(TAG)"; fi
+	@if grep -lE '^[A-Za-z_]+=[^#]*[[:space:]]#' /etc/claude-rc/*.env 2>/dev/null; then echo "refusing: inline # comment in the env file(s) above; systemd keeps it in the value"; exit 1; fi
 	tag=$$(git describe --tags --exact-match 2>/dev/null) || { echo "refusing: HEAD is not on a tag (use TAG=vX.Y)"; exit 1; }
 	echo "deploying $$tag"
 	if [ -f $(DEPLOYED) ] && [ "$$(cat $(DEPLOYED))" != "$$tag" ]; then cp $(DEPLOYED) $(PREVIOUS); fi

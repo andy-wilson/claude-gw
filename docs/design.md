@@ -58,10 +58,10 @@ flowchart LR
     subgraph ct [LXC claude-gw]
       direction TB
       subgraph home [profile cc-home]
-        u1[claude-rc@cc-home<br/>tmux + claude remote-control]
+        u1["claude-rc@cc-home<br/>tmux + claude remote-control"]
       end
       subgraph work ["profile cc-work (optional)"]
-        u2[claude-rc@cc-work<br/>tmux + claude remote-control]
+        u2["claude-rc@cc-work<br/>tmux + claude remote-control"]
       end
       health[claude-rc-health.timer<br/>every 2 min]
       sshd[sshd<br/>key auth, tailnet + LAN only]
@@ -108,7 +108,7 @@ claude remote-control \
   --verbose
 ```
 
-Bootstrap steps that must be done once at a terminal, per profile (`bootstrap/profile-login.sh`): `claude auth login` (the claude.ai option, not an API key), the Remote Control consent prompt, and the workspace trust prompt. After that the server starts unattended. The script also seeds `WORKDIR` as a git repo (worktree spawn mode needs one) with a `CLAUDE.md` that tells every session to keep a `HANDOVER.md`.
+Bootstrap steps that must be done once at a terminal, per profile (`bootstrap/profile-login.sh`): `claude auth login` (the claude.ai option, not an API key), the Remote Control consent prompt, and the workspace trust prompt. After that the server starts unattended. The script also seeds `WORKDIR` as a git repo (worktree spawn mode needs one) with a `CLAUDE.md` that tells every session to read and update a `HANDOVER.md` in its working tree (a per-session notes file, kept current by the `Stop` hook below).
 
 ### Supervision
 
@@ -149,7 +149,7 @@ One ntfy topic per profile on ntfy.sh with an access token. Alert bodies carry o
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle |
 | low | `rc-health` | Recovered |
 
-The `Notification` hook duplicates Claude's own push notifications on purpose: ntfy still works if the Remote Control connection is the thing that broke. A `Stop` hook keeps `HANDOVER.md` current in each worktree, so a fresh session can pick up where a stale one left off.
+The `Notification` hook duplicates Claude's own push notifications on purpose: ntfy still works if the Remote Control connection is the thing that broke. A `Stop` hook (`profiles/hooks/handover.sh`) writes the session's last state to `HANDOVER.md` in its working tree, so a fresh session can pick up where a stale one left off.
 
 ### Managed Claude settings
 
@@ -264,7 +264,7 @@ Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
-| Remote Control sessions go stale overnight (spinner on mobile); see anthropics/claude-code issues #28914 and #41128 | Medium | Health timer restarts the server; sessions resume within the 4 h window; otherwise start a new session from the device card. The `Stop` hook keeps `HANDOVER.md` in each worktree so only conversation context is lost |
+| Remote Control sessions go stale overnight (spinner on mobile); see anthropics/claude-code issues #28914 and #41128 | Medium | Health timer restarts the server; sessions resume within the 4 h window; otherwise start a new session from the device card. The `Stop` hook's per-worktree `HANDOVER.md` means only conversation context is lost |
 | Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | Version pinned; updates go through change control; AT1-AT8 rerun after every update |
 | The claude.ai login on the gateway expires or is revoked | Low | `rc-health` detects the fatal log pattern and alerts naming the profile; rerun `profile-login.sh` |
 | A compromised phone steers a lab session | Low | Trusted Devices, `acceptEdits` not `bypassPermissions`, lab-scoped credentials |
