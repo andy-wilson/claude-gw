@@ -196,7 +196,34 @@ The gateway has no inbound ports on the internet; the only ways in are Anthropic
 | Host | Unprivileged LXC; no other bind mounts |
 | Audit | journald for the units, Claude's own transcripts per profile, and (phase 3) `rcctl` logs every action with the requesting Tailscale identity |
 
-The one thing this design cannot protect against is the Anthropic account itself being compromised; Trusted Devices and a hardware key on the account are the mitigations.
+### If Anthropic, the account or Claude Code is compromised
+
+The gateway's purpose is to let a remote service run commands inside a private network. Every control in the table above that lives in Claude Code or on Anthropic's side (Trusted Devices, permission prompts, the approvals that answer them, managed-settings deny rules, `disableBypassPermissionsMode`) is only as trustworthy as Anthropic's relay, account system, model serving and the `@anthropic-ai/claude-code` npm package. Treat the gateway as a remote shell whose owner is whoever controls those.
+
+| Compromise | What it gives the attacker |
+| --- | --- |
+| Your claude.ai account (stolen session, phished login) | Start sessions on the gateway's card from their own device. Trusted Devices raises the bar but is enforced by Anthropic |
+| Anthropic's relay or account system | Start sessions as you without a device, and forge the approvals that answer permission prompts. Prompts and ntfy alerts still fire, but cannot be relied on to stop anything |
+| Model output (malicious or prompt-injected responses, including injected text in files under `/mnt/lab` or a worktree's `HANDOVER.md`) | Tool calls that try to do harm. Permission prompts still apply, so this depends on you approving them, unless combined with a relay compromise |
+| The npm package (malicious release) | Code runs as root during `npm install -g` (bootstrap, `rc-update`), then as each profile user every time a server starts. No Claude Code control applies; deny rules and permission modes are enforced by the very code that is compromised |
+
+What a compromised gateway can reach is everything the profile's Linux user can reach, because that is the only boundary not owned by Anthropic:
+
+- `/mnt/lab` read-write: read, exfiltrate, encrypt or delete it, and plant files that prompt-inject later sessions.
+- The network: the container sits on the LAN bridge and the tailnet with unrestricted egress, so it can scan and attack other LAN hosts, other tailnet nodes the Tailscale ACLs allow, and anything on the internet.
+- Credentials in the profile's home: the claude.ai login, the profile's ntfy token, and any SSH keys or cloud credentials placed there, which turn into lateral movement to those hosts and accounts.
+- Persistence as that user: user crontab, shell rc files, git hooks in the worktrees, modified files in `/mnt/lab`.
+
+What it cannot reach without a further local or kernel exploit: root in the container (the profile has no sudo; the only sudoers entry is for the phase 3 `rcctl` user), the other profile's home and credentials, the root-only env files, the Proxmox host (unprivileged LXC, so container root maps to an unprivileged host uid), and host-side ZFS snapshots of the share. A malicious npm release is the exception: it runs as root in the container, so treat the whole container as lost and restore it from a vzdump backup.
+
+Mitigations, roughly in order of value:
+
+1. **Restrict egress** (not yet implemented): Proxmox firewall on the container, default-deny to the LAN, allowing only the lab hosts sessions actually need, plus outbound HTTPS. Tag the gateway in Tailscale and give the tag no access to other nodes. This is what turns "inside the private network" into "inside one share and a short list of hosts".
+2. **Scope credentials**: only lab-only, least-privilege keys in profile homes; on target hosts, restrict them (`from=`, a non-root account, forced commands where possible). No cloud admin credentials.
+3. **Keep the share recoverable**: ZFS snapshots of the share dataset on the host, which the container cannot delete.
+4. **Updates**: the nightly `rc-update` timer is off by default. Enabling it, or installing `latest` on release day, shortens the window between a malicious npm release and it running here; `CLAUDE_CHANNEL=stable`, or pinning a version and updating by hand after a few days, lengthens it.
+5. **Account hygiene**: Trusted Devices, a hardware key on the claude.ai account, and checking active sessions and devices on the account.
+6. **Kill switch**: `systemctl stop claude-rc@<profile>` in the container, `pct stop <ctid>` on the host (works even if the container is compromised), and signing out the gateway's session on claude.ai.
 
 ## Change control and rollback
 
@@ -269,6 +296,7 @@ Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 | Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | `rc-update` reverts if the health check fails; rerun AT1-AT8 after updates you care about |
 | The claude.ai login on the gateway expires or is revoked | Low | `rc-health` detects the fatal log pattern and alerts naming the profile; rerun `profile-login.sh` |
 | A compromised phone steers a lab session | Low | Trusted Devices, `acceptEdits` not `bypassPermissions`, lab-scoped credentials |
+| Anthropic's relay, the claude.ai account or the Claude Code npm package is compromised, giving an attacker command execution inside the private network | Low, high impact | See "If Anthropic, the account or Claude Code is compromised": egress firewall, scoped credentials, host-side snapshots, auto-update off, kill switch |
 | Proxmox host down | Low | Out of scope; this is the lab's existing availability |
 
 ## Alternatives considered
