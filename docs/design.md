@@ -206,7 +206,7 @@ Every part of the gateway is either a git-tracked file or covered by a Proxmox b
 | --- | --- | --- | --- |
 | Container OS, Node, Claude Code version | The LXC itself | `apt` / `npm` after `proxmox/snapshot.sh take <ctid> <slug>` (vzdump; `pct snapshot` is unavailable with a bind mount) | `proxmox/snapshot.sh back <ctid> <volid>` (`pct restore`) |
 | systemd units, scripts, hooks, managed settings | This repo, checked out at `/opt/claude-gw` | `make deploy TAG=vX.Y` from a clean tree on a tag | `make rollback` (redeploys the previous tag) |
-| Claude Code itself | npm global, `stable` channel | `rc-update` by hand, or nightly via the opt-in `claude-rc-update.timer`: install, restart the servers, run the health check | Automatic: an unhealthy result reinstalls the previous version and alerts. By hand: `rc-update <version>` |
+| Claude Code itself | npm global, `latest` release (`CLAUDE_CHANNEL=stable` for the slower channel) | `rc-update` by hand, or nightly via the opt-in `claude-rc-update.timer`: install, restart the servers, run the health check | Automatic: an unhealthy result reinstalls the previous version and alerts. By hand: `rc-update <version>` |
 | Env files with secrets | `/etc/claude-rc/<profile>.env` | Edited by hand; `make deploy` never writes them | Covered by the vzdump backup |
 | Lab repos the sessions edit | Their own git remotes | `--spawn worktree` keeps each session on its own branch | `git worktree remove`; branch deleted |
 
@@ -266,7 +266,7 @@ Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
 | Remote Control sessions go stale overnight (spinner on mobile); see anthropics/claude-code issues #28914 and #41128 | Medium | Health timer restarts the server; sessions resume within the 4 h window; otherwise start a new session from the device card. The `Stop` hook's per-worktree `HANDOVER.md` means only conversation context is lost |
-| Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | `stable` channel only; `rc-update` reverts if the health check fails; rerun AT1-AT8 after updates you care about |
+| Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | `rc-update` reverts if the health check fails; rerun AT1-AT8 after updates you care about |
 | The claude.ai login on the gateway expires or is revoked | Low | `rc-health` detects the fatal log pattern and alerts naming the profile; rerun `profile-login.sh` |
 | A compromised phone steers a lab session | Low | Trusted Devices, `acceptEdits` not `bypassPermissions`, lab-scoped credentials |
 | Proxmox host down | Low | Out of scope; this is the lab's existing availability |
