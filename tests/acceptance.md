@@ -22,6 +22,7 @@ Result column (PASS / FAIL / SKIP + one line of evidence), commit with the tag.
 | AT14 | Rollback | tag a deliberately broken `rc-start` as `vX.Y-bad`, `make deploy TAG=vX.Y-bad`, observe AT7, `make rollback` | servers back within 2 min; `make status` shows previous tag | 3 | |
 | AT15 | Trusted Devices enforced | open a session from an un-enrolled browser | enrolment prompt; session not visible until enrolled | 1 | |
 | AT16 | Claude Code update and revert | in CT: `rc-update` (from an older version), `rc-update` again, then `rc-update 9.9.9` (no such version) | first updates to `latest`, healthy, ntfy `low`; second says up to date; the bad one reverts to the previous version with ntfy `high`; `make status` shows the installed version | 2 | |
+| AT17 | Egress firewall | host: `proxmox/firewall.sh enable <CTID>`; in CT as the profile: `curl -sI https://api.anthropic.com`, `nc -zw3 <proxmox-host> 8006`, `nc -zw3 <other-LAN-host> 22`, then `firewall.sh allow <CTID> <lab-host>` and `nc -zw3 <lab-host> <port>`; host: `firewall.sh disable <CTID>`, `status`, `enable` | internet and allowed hosts reachable; the Proxmox host and other LAN hosts time out; SSH in from the LAN and tailnet still works; card online and a session runs; disable warns, needs the CTID typed, is logged in the host syslog, and `status` shows DISABLED until re-enabled | 2 | |
 
 Non-functional (record numbers):
 
