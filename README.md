@@ -9,8 +9,8 @@ Architecture diagrams, component design, security model, change control, definit
 ## Requirements and caveats
 
 - A claude.ai subscription with Remote Control (Pro/Max, or Team/Enterprise with it enabled by an Owner). API keys and long-lived tokens are refused by Remote Control.
-- Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 12 with systemd.
-- A Tailscale account and an ntfy.sh topic (with an access token).
+- Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 12 with systemd. Scripts and `make` targets run as root inside the container.
+- A Tailscale account, and an ntfy.sh topic per profile with an access token that can only publish to it (sessions of that profile can see the token).
 - Built against Claude Code 2.1.312. It relies on `claude remote-control` flags and on the wording of its error messages (`FATAL_RE` in `bin/rc-health`), neither of which is a stable interface. Pin the version and rerun `tests/acceptance.md` after every update.
 - The profile names `cc-home` and `cc-work` are fixed in `bootstrap/bootstrap.sh` and `systemd/sudoers.d/claude-rc`; adding another means editing both.
 
@@ -30,7 +30,7 @@ Makefile     deploy TAG=vX.Y | rollback | status | verify
 
 ## Bring-up (home profile)
 
-On the Proxmox host:
+On the Proxmox host, with a dedicated directory to share with the gateway (it becomes `/mnt/lab`; nothing else on the host is mounted):
 
 ```bash
 CTID=<ctid> STORAGE=local-lvm TEMPLATE=debian-12-standard_12.12-1_amd64.tar.zst LAB_SHARE=/<pool>/lab-share ./proxmox/create-lxc.sh
@@ -45,23 +45,25 @@ tailscale up --ssh=false
 LAN_CIDR=192.168.1.0/24 bootstrap/bootstrap-tailscale.sh   # LAN subnet(s) allowed to SSH in
 cp etc/claude-rc/cc-home.env.example /etc/claude-rc/cc-home.env && $EDITOR /etc/claude-rc/cc-home.env
 bootstrap/profile-login.sh cc-home        # interactive: login, consent, trust
-git tag v0.1 && make deploy TAG=v0.1
+make deploy TAG=$(git describe --tags --abbrev=0)   # latest release
 make status
+PROFILE=cc-home ntfy-send low "claude-gw" "test"   # should arrive on the phone
 ```
 
-Then on the phone: Claude app → Code → the `home-claude-gw` card → start a session.
+Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-claude-gw` in the example) → start a session. Turn on Trusted Devices for the account, and work through `tests/acceptance.md`.
 
-## Day 2
+## Operations
 
 | Task | Command |
 | --- | --- |
 | Back up before any change | `proxmox/snapshot.sh take <ctid> <slug>` (host, vzdump) |
-| Deploy a release | `make deploy TAG=v0.2` |
-| Roll back | `make rollback` or `proxmox/snapshot.sh back <ctid> <volid>` |
+| Deploy a release | `git fetch --tags && make deploy TAG=vX.Y` |
+| Roll back | `make rollback` (previous tag) or `proxmox/snapshot.sh back <ctid> <volid>` (whole container) |
 | Health / what is deployed | `make status` |
 | Watch a server's terminal | `sudo -u cc-home tmux -L rc-cc-home attach` (detach: `Ctrl-b d`) |
+| Re-run the interactive logins | `bootstrap/profile-login.sh cc-home` |
 | Re-auth a claude.ai connector | `sudo -u cc-home env CLAUDE_CONFIG_DIR=/home/cc-home/.claude-cc-home claude mcp login "<name>" --no-browser` |
-| Update Claude Code | snapshot → `npm i -g @anthropic-ai/claude-code@<ver>` → `make deploy` → run `tests/acceptance.md` → tag |
+| Update Claude Code | back up → `npm i -g @anthropic-ai/claude-code@<ver>` → `systemctl restart claude-rc@cc-home` → run `tests/acceptance.md` → keep or restore the backup |
 
 ## Alerts
 
