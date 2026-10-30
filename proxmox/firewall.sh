@@ -70,6 +70,7 @@ policy_out: DROP
 172.16.0.0/12
 192.168.0.0/16
 169.254.0.0/16
+100.64.0.0/10
 
 [IPSET ssh_from] # ranges allowed to SSH in (LAN_CIDR)
 $(printf '%s\n' "${cidrs[@]}")
@@ -79,10 +80,12 @@ $(printf '%s\n' "${cidrs[@]}")
 IN SSH(ACCEPT) -source +ssh_from
 IN ACCEPT -source +private -p udp -dport 41641 # Tailscale direct
 IN Ping(ACCEPT) -source +private
+OUT DROP -dest ::/0 # no IPv6 out: there is no IPv6 route, and link-local would reach the LAN
 OUT DNS(ACCEPT) -dest $DNS
 OUT ACCEPT -dest +lab_allow
 OUT ACCEPT -dest +private -p udp -dport 41641 # Tailscale direct to LAN peers
 OUT DROP -dest +private
+OUT DROP -dest +ssh_from
 OUT HTTPS(ACCEPT)
 OUT HTTP(ACCEPT)
 OUT SSH(ACCEPT)
@@ -101,6 +104,12 @@ case "$cmd" in
       read -ra cidrs <<< "${LAN_CIDR//,/ }"
       for c in "${cidrs[@]}"; do valid "$c" 8 || die "LAN_CIDR: not an IPv4 range: $c"; done
       valid "$DNS" 32 || die "DNS: not an IPv4 address: $DNS"
+      # Every host address must fall in a dropped range, or the rules would let sessions reach it.
+      for h in $(ip -o -4 addr show | awk '$4 !~ /^127\./ {print $4}'); do
+        covered=no
+        for c in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 100.64.0.0/10 "${cidrs[@]}"; do in_cidr "${h%/*}" "$c" && covered=yes; done
+        [ $covered = yes ] || [ "${FORCE:-}" = 1 ] || die "host address $h is outside the private ranges and LAN_CIDR; add its range to LAN_CIDR (or FORCE=1)"
+      done
     fi
     # The datacenter switch also turns on this host's own firewall: keep that off, so only
     # guests with firewall=1 on a NIC (this one) are affected.
