@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/opt/claude-gw}"
-CLAUDE_VERSION="${CLAUDE_VERSION:-latest}"   # pin here once the first acceptance run passes
+CLAUDE_VERSION="${CLAUDE_VERSION:-stable}"   # npm channel or exact version; later updates: rc-update
 NODE_MAJOR="${NODE_MAJOR:-22}"
 PROFILES="${PROFILES:-cc-home}"              # add cc-work later if phase 4 happens
 

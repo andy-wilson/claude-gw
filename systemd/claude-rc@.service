@@ -17,6 +17,8 @@ User=%i
 Group=cc-lab
 EnvironmentFile=/etc/claude-rc/%i.env
 Environment=PROFILE=%i
+# The profile cannot write the global npm install; updates go through rc-update instead.
+Environment=DISABLE_AUTOUPDATER=1
 WorkingDirectory=/home/%i
 # tmux holds the pty that `claude remote-control` needs; rc-start exec's claude,
 # so the tmux session (and the unit's cgroup) ends when claude exits.
