@@ -153,7 +153,7 @@ The `Notification` hook duplicates Claude's own push notifications on purpose: n
 
 ### Egress firewall
 
-`proxmox/firewall.sh` puts a Proxmox firewall on the container's network interface. It runs on the host, so nothing inside the container, root included, can turn it off. Inbound, only SSH from `LAN_CIDR`, Tailscale's UDP port and ping from private ranges are accepted. Outbound, the container may reach its DNS resolver, the hosts in the `lab_allow` IP set (all ports), and the internet on TCP 22/80/443 and Tailscale's UDP ports; every other private address is dropped, the Proxmox host included.
+`proxmox/firewall.sh` puts a Proxmox firewall on the container's network interface. It runs on the host, so nothing inside the container, root included, can turn it off. Inbound, only SSH from `LAN_CIDR`, Tailscale's UDP port and ping from private ranges are accepted. Outbound, the container may reach its DNS resolver, the hosts in the `lab_allow` IP set (all ports), and the internet on TCP 22/80/443 and Tailscale's UDP ports; every other private or carrier-grade NAT address, and anything in `LAN_CIDR`, is dropped, the Proxmox host included (`enable` refuses if a host address falls outside those). All outbound IPv6 is dropped: the container has no IPv6 route, and link-local addresses would otherwise reach the LAN.
 
 | Command (on the host) | Effect |
 | --- | --- |
