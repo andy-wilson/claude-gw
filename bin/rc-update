@@ -6,6 +6,8 @@
 #   rc-update <version>  install exactly that version (forward or back)
 # Nightly when claude-rc-update.timer is enabled (opt-in; make deploy never enables it).
 set -euo pipefail
+# rc-health and ntfy-send live here; `pct exec` and other bare shells leave it off PATH.
+export PATH="/usr/local/bin:$PATH"
 
 PKG=@anthropic-ai/claude-code
 CHANNEL="${CLAUDE_CHANNEL:-latest}"
