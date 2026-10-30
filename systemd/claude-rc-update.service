@@ -1,5 +1,5 @@
 [Unit]
-Description=Update Claude Code from the stable channel, revert if unhealthy
+Description=Update Claude Code to the latest release, revert if unhealthy
 After=network-online.target
 Wants=network-online.target
 
