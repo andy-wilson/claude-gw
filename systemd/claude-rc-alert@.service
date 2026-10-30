@@ -1,0 +1,9 @@
+# Fired by OnFailure= of claude-rc@<profile> when systemd gives up restarting it.
+[Unit]
+Description=Alert: claude-rc@%i has failed and is no longer being restarted
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/claude-rc/%i.env
+Environment=PROFILE=%i
+ExecStart=/usr/local/bin/rc-alert unit-failed

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Alert paths for a profile. Called by claude-rc-alert@.service (unit-failed)
+# and by rc-health (down, recovered, degraded).
+#   rc-alert unit-failed            urgent: systemd gave up restarting
+#   rc-alert down <n>               high:   health check missed n times
+#   rc-alert degraded "<reason>"    high:   process alive but log shows a known fatal
+#   rc-alert recovered              low:    back after a down/degraded
+set -euo pipefail
+
+kind="${1:?kind}"; arg="${2:-}"
+PROFILE="${PROFILE:?PROFILE unset}"
+HOST="$(hostname -s)"
+
+case "$kind" in
+  unit-failed)
+    # No log lines in the body (design: nothing lab-specific leaves the house).
+    ntfy-send urgent "claude-gw: $PROFILE DOWN, not restarting" \
+      "claude-rc@$PROFILE on $HOST hit its restart limit. Needs a hand: ssh in, check journalctl -u claude-rc@$PROFILE, then systemctl reset-failed claude-rc@$PROFILE && systemctl start claude-rc@$PROFILE" "rotating_light"
+    ;;
+  down)
+    ntfy-send high "claude-gw: $PROFILE unhealthy" \
+      "Health check missed $arg times on $HOST; restart requested. If this repeats, see journalctl -u claude-rc@$PROFILE." "warning"
+    ;;
+  degraded)
+    ntfy-send high "claude-gw: $PROFILE needs attention" \
+      "$arg on $HOST. The process is up but Remote Control may be unusable." "warning"
+    ;;
+  recovered)
+    ntfy-send low "claude-gw: $PROFILE recovered" "claude-rc@$PROFILE on $HOST is healthy again." "white_check_mark"
+    ;;
+  *) echo "unknown kind $kind" >&2; exit 2 ;;
+esac

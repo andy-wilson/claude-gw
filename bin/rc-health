@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Health check for every enabled claude-rc@<profile>. Run by claude-rc-health.timer as root.
+#
+# Per profile:
+#   healthy   = unit active AND tmux session present AND a `claude` process in the unit
+#               AND no fatal pattern in the last 60 log lines
+#   miss      = any of the first three false   -> restart the unit; alert on 2 consecutive misses
+#   degraded  = fatal pattern in the log        -> alert once per distinct pattern, restart
+# State in /var/lib/claude-rc/health-<profile>.json so alerts don't repeat every 2 min.
+# That dir is root-only; the log dir is profile-writable, so logs are only touched as the profile.
+set -uo pipefail
+
+STATE_DIR=/var/lib/claude-rc
+LOG_DIR=/var/log/claude-rc
+MISS_ALERT_AT="${MISS_ALERT_AT:-2}"
+# Patterns Claude Code prints when Remote Control is broken in a way a restart won't fix.
+FATAL_RE='Remote credentials fetch failed|requires a claude.ai subscription|full-scope login token|disabled by your organization|Remote Control isn.t enabled|Couldn.t verify Remote Control eligibility|giving up'
+
+# Enabled template instances are symlinks in the wants dir; list-unit-files does not list them.
+mapfile -t profiles < <(ls /etc/systemd/system/multi-user.target.wants/ 2>/dev/null \
+  | sed -nE 's/^claude-rc@(.+)\.service$/\1/p')
+[ ${#profiles[@]} -eq 0 ] && { echo "no enabled claude-rc@ instances"; exit 0; }
+
+rc=0
+for p in "${profiles[@]}"; do
+  state="$STATE_DIR/health-$p.json"
+  [ -f "$state" ] || echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+  misses=$(jq -r .misses "$state"); alerted=$(jq -r .alerted "$state"); degraded=$(jq -r .degraded "$state")
+
+  active=$(systemctl is-active "claude-rc@$p" 2>/dev/null || true)
+  has_tmux=no; has_proc=no
+  if sudo -u "$p" -H tmux -L "rc-$p" has-session -t rc 2>/dev/null; then has_tmux=yes; fi
+  if systemctl show -p ControlGroup --value "claude-rc@$p" | grep -q . \
+     && pgrep -u "$p" -f 'claude remote-control|claude-code' >/dev/null 2>&1; then has_proc=yes; fi
+
+  fatal=""
+  if [ -f "$LOG_DIR/$p.log" ]; then
+    fatal=$(tail -n 60 "$LOG_DIR/$p.log" | grep -oE "$FATAL_RE" | tail -n1 || true)
+  fi
+
+  if [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ]; then
+    if [ "$alerted" = true ] || [ "$misses" -gt 0 ] || [ -n "$degraded" ]; then
+      [ "$alerted" = true ] && PROFILE=$p rc-alert recovered || true
+      echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+    fi
+    echo "$p: healthy"
+    continue
+  fi
+
+  rc=1
+  if [ -n "$fatal" ]; then
+    echo "$p: degraded ($fatal)"
+    if [ "$degraded" != "$fatal" ]; then
+      PROFILE=$p rc-alert degraded "$fatal" || true
+      jq --arg f "$fatal" '.degraded=$f | .alerted=true' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    fi
+    # A restart clears a transient; a real auth problem will show the same pattern again (no re-alert).
+    sudo -u "$p" truncate -s 0 "$LOG_DIR/$p.log" || true
+    systemctl restart "claude-rc@$p" || true
+    continue
+  fi
+
+  misses=$((misses + 1))
+  echo "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
+  systemctl restart "claude-rc@$p" || true
+  if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
+    PROFILE=$p rc-alert down "$misses" || true
+    alerted=true
+  fi
+  jq --argjson m "$misses" --argjson a "$alerted" '.misses=$m | .alerted=$a' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+done
+exit $rc

@@ -1,0 +1,8 @@
+# Lets the (future) rcctl service user restart profile units and nothing else.
+# Install with: install -m 0440 systemd/sudoers.d/claude-rc /etc/sudoers.d/claude-rc
+# Exact commands only: a sudoers `*` also matches extra arguments (other units). One line per profile.
+Cmnd_Alias CLAUDE_RC = /usr/bin/systemctl start claude-rc@cc-home.service, \
+                       /usr/bin/systemctl stop claude-rc@cc-home.service, \
+                       /usr/bin/systemctl restart claude-rc@cc-home.service, \
+                       /usr/bin/systemctl reset-failed claude-rc@cc-home.service
+rcctl ALL=(root) NOPASSWD: CLAUDE_RC

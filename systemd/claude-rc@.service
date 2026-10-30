@@ -1,0 +1,38 @@
+# Claude Code Remote Control server, one instance per profile.
+#   systemctl enable --now claude-rc@cc-home
+# Instance name = Linux user = /etc/claude-rc/<name>.env
+[Unit]
+Description=Claude Remote Control (%i)
+Documentation=https://code.claude.com/docs/en/remote-control
+After=network-online.target tailscaled.service
+Wants=network-online.target
+# Five failures in ten minutes -> stop retrying and fire OnFailure (-> ntfy urgent).
+StartLimitIntervalSec=600
+StartLimitBurst=5
+OnFailure=claude-rc-alert@%i.service
+
+[Service]
+Type=forking
+User=%i
+Group=cc-lab
+EnvironmentFile=/etc/claude-rc/%i.env
+Environment=PROFILE=%i
+WorkingDirectory=/home/%i
+# tmux holds the pty that `claude remote-control` needs; rc-start exec's claude,
+# so the tmux session (and the unit's cgroup) ends when claude exits.
+ExecStart=/usr/bin/tmux -L rc-%i new-session -d -s rc /usr/local/bin/rc-start
+# Mirror the pane to a log file for the health check and for rcctl.
+ExecStartPost=/usr/bin/tmux -L rc-%i pipe-pane -t rc -o 'cat >> /var/log/claude-rc/%i.log'
+ExecStop=/usr/bin/tmux -L rc-%i kill-server
+KillMode=control-group
+TimeoutStopSec=20
+Restart=always
+RestartSec=15
+# Belt and braces: don't let a session see the other profile's home.
+ProtectHome=tmpfs
+BindPaths=/home/%i
+ReadWritePaths=/mnt/lab /var/log/claude-rc /var/lib/claude-rc
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

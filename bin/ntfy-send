@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Post a notification to ntfy.sh. Bodies stay generic on purpose (design: nothing
+# lab-specific leaves the house). Reads NTFY_TOPIC and NTFY_TOKEN from the
+# environment or from /etc/claude-rc/$PROFILE.env.
+#
+#   ntfy-send <priority: min|low|default|high|urgent> "<title>" "<body>" [tags]
+set -euo pipefail
+
+prio="${1:-default}"; title="${2:-claude-gw}"; body="${3:-}"; tags="${4:-}"
+PROFILE="${PROFILE:-}"
+if [ -z "${NTFY_TOPIC:-}" ] && [ -n "$PROFILE" ] && [ -r "/etc/claude-rc/$PROFILE.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "/etc/claude-rc/$PROFILE.env"
+  set +a
+fi
+: "${NTFY_TOPIC:?NTFY_TOPIC unset}"
+NTFY_URL="${NTFY_URL:-https://ntfy.sh}"
+
+args=(-fsS --max-time 10 -H "Title: $title" -H "Priority: $prio")
+[ -n "$tags" ] && args+=(-H "Tags: $tags")
+[ -n "${NTFY_TOKEN:-}" ] && args+=(-H "Authorization: Bearer $NTFY_TOKEN")
+
+curl "${args[@]}" -d "$body" "$NTFY_URL/$NTFY_TOPIC" >/dev/null

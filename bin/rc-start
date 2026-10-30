@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Starts the Remote Control server for one profile. Normally exec'd by tmux
+# from claude-rc@.service; can be run by hand as the profile user for debugging:
+#   PROFILE=cc-home rc-start
+# All settings come from /etc/claude-rc/$PROFILE.env (loaded by systemd, or here).
+set -euo pipefail
+
+PROFILE="${PROFILE:-$(id -un)}"
+if [ -z "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "/etc/claude-rc/$PROFILE.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "/etc/claude-rc/$PROFILE.env"
+  set +a
+fi
+: "${CLAUDE_CONFIG_DIR:?}" "${WORKDIR:?}"
+export CLAUDE_CONFIG_DIR
+
+# Remote Control refuses API-key auth and gateways; make sure none leak in from the env.
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_OAUTH_TOKEN \
+      CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC DISABLE_GROWTHBOOK
+
+cd "$WORKDIR"
+echo "[rc-start] $(date -Is) profile=$PROFILE workdir=$WORKDIR config=$CLAUDE_CONFIG_DIR claude=$(claude --version 2>/dev/null || echo '?')"
+
+exec claude remote-control \
+  --name "${RC_NAME:-$PROFILE-$(hostname -s)}" \
+  --spawn "${RC_SPAWN:-worktree}" \
+  --capacity "${RC_CAPACITY:-16}" \
+  --permission-mode "${RC_PERMISSION_MODE:-acceptEdits}" \
+  --verbose

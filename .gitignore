@@ -1,0 +1,5 @@
+# secrets and machine state never go in the repo
+etc/claude-rc/*.env
+!etc/claude-rc/*.env.example
+*.log
+# tests/results/<tag>.md ARE committed (design: DoD evidence lives in the repo)

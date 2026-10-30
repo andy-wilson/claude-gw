@@ -1,0 +1,7 @@
+[Unit]
+Description=Health check for all claude-rc@ instances
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rc-health
