@@ -12,6 +12,7 @@ Architecture diagrams, component design, security model, change control, definit
 - Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 12 with systemd. Scripts and `make` targets run as root inside the container.
 - A Tailscale account, and an ntfy.sh topic per profile with an access token that can only publish to it (sessions of that profile can see the token).
 - Built against Claude Code 2.1.312. It relies on `claude remote-control` flags and on the wording of its error messages (`FATAL_RE` in `bin/rc-health`), neither of which is a stable interface. Updates come from npm's `latest` release through `rc-update`, which reverts if the servers come back unhealthy; rerun `tests/acceptance.md` after updates you care about.
+- Anyone who controls your claude.ai account, Anthropic's relay or the Claude Code npm package can run commands on the gateway and reach whatever it can reach on your network. Restrict its egress and credentials; see "If Anthropic, the account or Claude Code is compromised" in `docs/design.md`.
 - The profile names `cc-home` and `cc-work` are fixed in `bootstrap/bootstrap.sh` and `systemd/sudoers.d/claude-rc`; adding another means editing both.
 
 ## Layout
