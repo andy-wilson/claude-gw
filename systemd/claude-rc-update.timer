@@ -1,0 +1,10 @@
+# Opt-in: systemctl enable --now claude-rc-update.timer   (make deploy installs, never enables)
+[Unit]
+Description=Nightly Claude Code update check
+
+[Timer]
+OnCalendar=*-*-* 04:00
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

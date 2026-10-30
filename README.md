@@ -11,7 +11,7 @@ Architecture diagrams, component design, security model, change control, definit
 - A claude.ai subscription with Remote Control (Pro/Max, or Team/Enterprise with it enabled by an Owner). API keys and long-lived tokens are refused by Remote Control.
 - Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 12 with systemd. Scripts and `make` targets run as root inside the container.
 - A Tailscale account, and an ntfy.sh topic per profile with an access token that can only publish to it (sessions of that profile can see the token).
-- Built against Claude Code 2.1.312. It relies on `claude remote-control` flags and on the wording of its error messages (`FATAL_RE` in `bin/rc-health`), neither of which is a stable interface. Pin the version and rerun `tests/acceptance.md` after every update.
+- Built against Claude Code 2.1.312. It relies on `claude remote-control` flags and on the wording of its error messages (`FATAL_RE` in `bin/rc-health`), neither of which is a stable interface. Updates come from npm's `stable` channel through `rc-update`, which reverts if the servers come back unhealthy; rerun `tests/acceptance.md` after updates you care about.
 - The profile names `cc-home` and `cc-work` are fixed in `bootstrap/bootstrap.sh` and `systemd/sudoers.d/claude-rc`; adding another means editing both.
 
 ## Layout
@@ -19,8 +19,8 @@ Architecture diagrams, component design, security model, change control, definit
 ```
 proxmox/     create-lxc.sh, snapshot.sh         run on the Proxmox host
 bootstrap/   bootstrap.sh, bootstrap-tailscale.sh, profile-login.sh   run in the container
-systemd/     claude-rc@.service, alert unit, health service + timer, sudoers
-bin/         rc-start, rc-health, rc-alert, ntfy-send   -> /usr/local/bin
+systemd/     claude-rc@.service, alert unit, health and update services + timers, sudoers
+bin/         rc-start, rc-health, rc-alert, rc-update, ntfy-send   -> /usr/local/bin
 profiles/    settings.json (-> /etc/claude-code/managed-settings.json), hooks/, workdir-CLAUDE.md
 etc/         *.env.example  -> copy to /etc/claude-rc/<profile>.env (never committed)
 docs/        design.md: architecture, components, DoD
@@ -63,7 +63,8 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Watch a server's terminal | `sudo -u cc-home tmux -L rc-cc-home attach` (detach: `Ctrl-b d`) |
 | Re-run the interactive logins | `bootstrap/profile-login.sh cc-home` |
 | Re-auth a claude.ai connector | `sudo -u cc-home env CLAUDE_CONFIG_DIR=/home/cc-home/.claude-cc-home claude mcp login "<name>" --no-browser` |
-| Update Claude Code | back up → `npm i -g @anthropic-ai/claude-code@<ver>` → `systemctl restart claude-rc@cc-home` → run `tests/acceptance.md` → keep or restore the backup |
+| Update Claude Code | `rc-update` (newer `stable` only) or `rc-update <version>` (any version, including back); restarts the servers and reverts if unhealthy |
+| Auto-update nightly (opt-in) | `systemctl enable --now claude-rc-update.timer` (`disable --now` to stop); ntfy low on success, high on revert |
 
 ## Alerts
 

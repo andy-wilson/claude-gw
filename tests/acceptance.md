@@ -21,6 +21,7 @@ Result column (PASS / FAIL / SKIP + one line of evidence), commit with the tag.
 | AT13 | Permission prompt reaches phone | prompt a command outside `acceptEdits` (e.g. `rm` of a tracked file) | Claude push **and** ntfy `high` arrive; approving from the phone unblocks | 2 | |
 | AT14 | Rollback | tag a deliberately broken `rc-start` as `vX.Y-bad`, `make deploy TAG=vX.Y-bad`, observe AT7, `make rollback` | servers back within 2 min; `make status` shows previous tag | 3 | |
 | AT15 | Trusted Devices enforced | open a session from an un-enrolled browser | enrolment prompt; session not visible until enrolled | 1 | |
+| AT16 | Claude Code update and revert | in CT: `rc-update <older version>` then `rc-update`; then `rc-update 9.9.9` (no such version) | first two end healthy on the expected version with ntfy `low`; the bad one reverts to the previous version with ntfy `high`; `make status` shows the installed version | 2 | |
 
 Non-functional (record numbers):
 

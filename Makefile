@@ -41,10 +41,11 @@ _preflight:
 
 _install:
 	install -d $(PREFIX)/bin $(HOOK_DIR) $(STATE_DIR) /var/log/claude-rc /etc/claude-rc
-	install -m 0755 bin/rc-start bin/rc-health bin/rc-alert bin/ntfy-send $(PREFIX)/bin/
+	install -m 0755 bin/rc-start bin/rc-health bin/rc-alert bin/rc-update bin/ntfy-send $(PREFIX)/bin/
 	install -m 0755 profiles/hooks/*.sh $(HOOK_DIR)/
 	install -m 0644 systemd/claude-rc@.service systemd/claude-rc-alert@.service \
-	                systemd/claude-rc-health.service systemd/claude-rc-health.timer $(UNIT_DIR)/
+	                systemd/claude-rc-health.service systemd/claude-rc-health.timer \
+	                systemd/claude-rc-update.service systemd/claude-rc-update.timer $(UNIT_DIR)/
 	install -m 0440 systemd/sudoers.d/claude-rc /etc/sudoers.d/claude-rc
 	# Root-only dirs: profiles get their own pre-created log file and nothing else (no squatting, no symlinks).
 	chown root:root /var/log/claude-rc $(STATE_DIR); chmod 0755 /var/log/claude-rc; chmod 0700 $(STATE_DIR)

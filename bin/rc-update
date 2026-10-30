@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Update Claude Code from the npm `stable` channel, restart every profile's server, and
+# revert to the previous version if any profile is unhealthy afterwards. Run as root:
+#   rc-update            update if stable is newer than what is installed
+#   rc-update <version>  install exactly that version (forward or back)
+# Nightly when claude-rc-update.timer is enabled (opt-in; make deploy never enables it).
+set -euo pipefail
+
+PKG=@anthropic-ai/claude-code
+current="$(claude --version | awk '{print $1}')"
+want="${1:-$(npm view "$PKG@stable" version)}"
+if [ -z "${1:-}" ] && [ "$(printf '%s\n%s\n' "$want" "$current" | sort -V | tail -n1)" = "$current" ]; then
+  echo "claude $current is up to date (stable is $want)"; exit 0
+fi
+[ "$want" != "$current" ] || { echo "claude $current already installed"; exit 0; }
+
+mapfile -t profiles < <(ls /etc/systemd/system/multi-user.target.wants/ 2>/dev/null \
+  | sed -nE 's/^claude-rc@(.+)\.service$/\1/p')
+
+# && chains on purpose: set -e does not apply inside a function called from `if`.
+install_and_check() {
+  npm install -g --silent "$PKG@$1" \
+    && claude --version > /etc/claude-rc/CLAUDE_VERSION \
+    && for p in "${profiles[@]}"; do systemctl restart "claude-rc@$p" || return 1; done \
+    && sleep 60 \
+    && rc-health
+}
+alert() { for p in "${profiles[@]}"; do PROFILE=$p ntfy-send "$@" || true; done; }
+
+echo "updating claude $current -> $want"
+if install_and_check "$want"; then
+  alert low "claude-gw: Claude Code updated" "$current -> $want on $(hostname -s); healthy." white_check_mark
+else
+  install_and_check "$current" || true
+  alert high "claude-gw: Claude Code update failed" "$want did not come up healthy on $(hostname -s); reverted to $current." warning
+  exit 1
+fi

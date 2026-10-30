@@ -165,7 +165,7 @@ A single Go binary (`rcctl`) served only on the tailnet via `tsnet`, so Tailscal
 | Sessions | `$CLAUDE_CONFIG_DIR/projects/*/` transcripts: title, working tree, last activity | open in claude.ai/code |
 | Worktrees | `git worktree list` per repo | prune merged worktrees |
 | Logs | journald for the units, the per-profile log | tail, download |
-| Health | last check, last alert, uptime, deployed tag, Claude Code version | silence alerts for N minutes |
+| Health | last check, last alert, uptime, deployed tag, Claude Code version | silence alerts for N minutes, run `rc-update` |
 
 The page is deliberately thin: Remote Control already provides the live session UI, so `rcctl` only covers what the Claude app cannot show (process state, logs, worktrees) and what it cannot do (restart the server).
 
@@ -206,14 +206,14 @@ Every part of the gateway is either a git-tracked file or covered by a Proxmox b
 | --- | --- | --- | --- |
 | Container OS, Node, Claude Code version | The LXC itself | `apt` / `npm` after `proxmox/snapshot.sh take <ctid> <slug>` (vzdump; `pct snapshot` is unavailable with a bind mount) | `proxmox/snapshot.sh back <ctid> <volid>` (`pct restore`) |
 | systemd units, scripts, hooks, managed settings | This repo, checked out at `/opt/claude-gw` | `make deploy TAG=vX.Y` from a clean tree on a tag | `make rollback` (redeploys the previous tag) |
-| Claude Code itself | npm global | Pinned; update only after reading the changelog for Remote Control changes | `npm i -g @anthropic-ai/claude-code@<previous>` |
+| Claude Code itself | npm global, `stable` channel | `rc-update` by hand, or nightly via the opt-in `claude-rc-update.timer`: install, restart the servers, run the health check | Automatic: an unhealthy result reinstalls the previous version and alerts. By hand: `rc-update <version>` |
 | Env files with secrets | `/etc/claude-rc/<profile>.env` | Edited by hand; `make deploy` never writes them | Covered by the vzdump backup |
 | Lab repos the sessions edit | Their own git remotes | `--spawn worktree` keeps each session on its own branch | `git worktree remove`; branch deleted |
 
 Rules:
 
 1. No change to the gateway without a backup first and a repo tag after; `make deploy` refuses a dirty tree or an untagged HEAD.
-2. Claude Code updates are a change like any other: back up, update, run the acceptance tests, tag or roll back.
+2. Claude Code updates go through `rc-update`, whose health check and automatic revert stand in for the backup and acceptance run. That catches a server that will not start or logs a known fatal error, not a quiet behaviour change, so leave the timer off if you want every update reviewed. Claude Code's own auto-updater is disabled (`DISABLE_AUTOUPDATER=1`); the profile users could not write the global install anyway.
 3. A failed acceptance test after a change is a rollback, not a fix-forward, unless the fix is itself a one-line reversible change.
 
 ## Definition of done and acceptance tests
@@ -237,6 +237,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 | AT13 | Permission prompt reaches the phone via push and ntfy | 2 |
 | AT14 | A broken release rolls back within 2 min | 3 |
 | AT15 | Trusted Devices enforced on an un-enrolled browser | 1 |
+| AT16 | Claude Code update installs, and a bad one reverts with an alert | 2 |
 
 Non-functional: idle CPU under 5 %, memory under 1.5 GB with servers idle, nothing listening on the LAN except Tailscale and filtered sshd, and bootstrap from a fresh LXC to AT1 under 20 minutes excluding the interactive logins.
 
@@ -248,8 +249,8 @@ Phase 1 is usable on its own and is where the value lands; the rest hardens it. 
 flowchart LR
   p1["Phase 1: Usable<br/>LXC, bootstrap, one profile,<br/>systemd + tmux, Tailscale, ntfy"]
   g1{{"Gate: AT1-3, AT9, AT15"}}
-  p2["Phase 2: Resilient<br/>health timer, alert paths,<br/>notification hooks"]
-  g2{{"Gate: AT4-8, AT13"}}
+  p2["Phase 2: Resilient<br/>health timer, alert paths,<br/>notification hooks, updates"]
+  g2{{"Gate: AT4-8, AT13, AT16"}}
   p3["Phase 3: Operable<br/>rcctl control page,<br/>rollback drill"]
   g3{{"Gate: AT10, AT14"}}
   p4["Phase 4: Second account<br/>optional work profile"]
@@ -265,7 +266,7 @@ Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
 | Remote Control sessions go stale overnight (spinner on mobile); see anthropics/claude-code issues #28914 and #41128 | Medium | Health timer restarts the server; sessions resume within the 4 h window; otherwise start a new session from the device card. The `Stop` hook's per-worktree `HANDOVER.md` means only conversation context is lost |
-| Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | Version pinned; updates go through change control; AT1-AT8 rerun after every update |
+| Anthropic changes server-mode flags or error wording in a Claude Code release | Medium | `stable` channel only; `rc-update` reverts if the health check fails; rerun AT1-AT8 after updates you care about |
 | The claude.ai login on the gateway expires or is revoked | Low | `rc-health` detects the fatal log pattern and alerts naming the profile; rerun `profile-login.sh` |
 | A compromised phone steers a lab session | Low | Trusted Devices, `acceptEdits` not `bypassPermissions`, lab-scoped credentials |
 | Proxmox host down | Low | Out of scope; this is the lab's existing availability |
