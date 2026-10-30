@@ -76,6 +76,10 @@ ntfy.sh topic per profile (`NTFY_TOPIC` in the env file). Bodies are deliberatel
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle |
 | low | `rc-health` | Recovered |
 
+## Warranty
+
+No warranty is implied. Use at your own risk. This software runs an AI agent with access to your lab; you are responsible for what it can reach and what it does.
+
 ## License
 
 MIT, see `LICENSE`.
