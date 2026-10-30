@@ -4,6 +4,8 @@ Always-on Claude Code **Remote Control** gateway for a home Proxmox lab. One unp
 
 Sessions flow through Anthropic's relay (the gateway polls outbound), so nothing is exposed at the router. Each profile is a separate Linux user with its own `CLAUDE_CONFIG_DIR`, so two accounts never share credentials or transcripts. The only lab filesystem a session can touch is one dedicated share bind-mounted at `/mnt/lab`.
 
+Architecture diagrams, component design, security model, change control, definition of done and phases: [`docs/design.md`](docs/design.md).
+
 ## Requirements and caveats
 
 - A claude.ai subscription with Remote Control (Pro/Max, or Team/Enterprise with it enabled by an Owner). API keys and long-lived tokens are refused by Remote Control.
@@ -21,6 +23,7 @@ systemd/     claude-rc@.service, alert unit, health service + timer, sudoers
 bin/         rc-start, rc-health, rc-alert, ntfy-send   -> /usr/local/bin
 profiles/    settings.json (hooks + permissions), hooks/, workdir-CLAUDE.md
 etc/         *.env.example  -> copy to /etc/claude-rc/<profile>.env (never committed)
+docs/        design.md: architecture, components, DoD
 tests/       acceptance.md checklist; results/<tag>.md committed per release
 Makefile     deploy TAG=vX.Y | rollback | status | verify
 ```
