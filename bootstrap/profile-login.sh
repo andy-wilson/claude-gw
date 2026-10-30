@@ -18,17 +18,16 @@ set +a
 : "${CLAUDE_CONFIG_DIR:?}" "${WORKDIR:?}"
 
 id "$PROFILE" >/dev/null
-install -d -o "$PROFILE" -g cc-lab -m 0700 "$CLAUDE_CONFIG_DIR"
-install -d -o "$PROFILE" -g cc-lab -m 0775 "$WORKDIR"
-
 run_as() { sudo -u "$PROFILE" -H env CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" "$@"; }
+
+# As the profile: root must not create, write or chown inside paths the profile controls (symlinks).
+run_as install -d -m 0700 "$CLAUDE_CONFIG_DIR" "$WORKDIR"
 
 # worktree spawn mode needs a git repo in WORKDIR. Seed one with a CLAUDE.md that
 # tells every session to read/write HANDOVER.md (the only context that survives a stale session).
 if [ ! -d "$WORKDIR/.git" ]; then
   echo "== seeding git repo in $WORKDIR =="
-  cp "$(dirname "$0")/../profiles/workdir-CLAUDE.md" "$WORKDIR/CLAUDE.md"
-  chown "$PROFILE:cc-lab" "$WORKDIR/CLAUDE.md"
+  run_as sh -c 'cat > "$1"' _ "$WORKDIR/CLAUDE.md" < "$(dirname "$0")/../profiles/workdir-CLAUDE.md"
   run_as git -C "$WORKDIR" init -q -b main
   run_as git -C "$WORKDIR" -c user.name="$PROFILE" -c user.email="$PROFILE@claude-gw" add CLAUDE.md
   run_as git -C "$WORKDIR" -c user.name="$PROFILE" -c user.email="$PROFILE@claude-gw" commit -q -m "seed workdir"

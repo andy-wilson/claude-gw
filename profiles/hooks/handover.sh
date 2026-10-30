@@ -25,6 +25,9 @@ if [ -f "$f" ]; then
 fi
 [ -n "$plan" ] || plan=$'## Plan / open items\n\n- (maintained by the session: what is in flight, what is next, what to avoid)\n'
 
+tmp="$(mktemp "$cwd/.HANDOVER.XXXXXX")" || exit 0
+trap 'rm -f "$tmp"' EXIT
+chmod 0644 "$tmp"
 {
   printf '# HANDOVER\n\n'
   printf 'Auto-updated by the Stop hook. A new session should read this first.\n\n'
@@ -32,5 +35,5 @@ fi
     "$(date -Is)" "${session:-?}" "$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
   printf '%s\n\n' "$last"
   printf '%s\n' "$plan"
-} > "$f.tmp" && mv "$f.tmp" "$f"
+} > "$tmp" && mv "$tmp" "$f"
 exit 0

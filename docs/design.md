@@ -97,7 +97,7 @@ One dedicated lab share from the host is bind-mounted read-write at `/mnt/lab`. 
 
 One `claude remote-control` server per profile, started in a tmux session owned by that user. Each server serves many concurrent sessions (`RC_CAPACITY`), and `--spawn worktree` gives each session its own git worktree of `WORKDIR`, so one server per profile covers many parallel tasks.
 
-`bin/rc-start` (run as the profile user) loads `/etc/claude-rc/<profile>.env`, unsets any API-key or gateway variables, and execs:
+`bin/rc-start` (run as the profile user, with the unit having loaded the root-only `/etc/claude-rc/<profile>.env`) unsets any API-key or gateway variables, and execs:
 
 ```bash
 claude remote-control \
@@ -153,7 +153,7 @@ The `Notification` hook duplicates Claude's own push notifications on purpose: n
 
 ### Managed Claude settings
 
-`profiles/settings.json` holds the `permissions` and `hooks` keys that `make deploy` writes into each profile's `settings.json`, leaving everything else (plugins, MCP config) alone. The deny list blocks reading other profiles' config and `/etc/claude-rc`, and `sudo`.
+`make deploy` installs `profiles/settings.json` as `/etc/claude-code/managed-settings.json`. Managed settings are root-owned and take precedence over anything a profile or project sets, so a session cannot remove the hooks or deny rules, and `disableBypassPermissionsMode` blocks `bypassPermissions` outright. Each profile's own `settings.json` (plugins, MCP config, its approvals) is left alone. Isolation between profiles is enforced by the OS (separate users, `ProtectHome`, 0700 config and working directories, root-only env files), not by these rules.
 
 ### Control page (phase 3)
 
@@ -192,7 +192,7 @@ The gateway has no inbound ports on the internet; the only ways in are Anthropic
 | Control page (phase 3) | `tsnet` only, Tailscale ACL limited to the owner's devices |
 | What a session can do | `--permission-mode acceptEdits`, never `bypassPermissions`; destructive commands still prompt, and the prompt reaches the phone via push and ntfy |
 | Blast radius of a bad prompt | Each profile is a separate unprivileged user; one dedicated share at `/mnt/lab` is the only lab filesystem mounted; cloud and hypervisor credentials scoped to lab-only roles |
-| Secrets at rest | Credentials in each profile's config dir (0700); ntfy tokens in `/etc/claude-rc/*.env`, never in git |
+| Secrets at rest | Credentials in each profile's config dir (0700); ntfy tokens in `/etc/claude-rc/*.env` (0600 root), never in git. A profile's own sessions can still see its ntfy topic and token in their environment, because the notification hook needs them; use a token that can only publish to that topic |
 | Host | Unprivileged LXC; no other bind mounts |
 | Audit | journald for the units, Claude's own transcripts per profile, and (phase 3) `rcctl` logs every action with the requesting Tailscale identity |
 

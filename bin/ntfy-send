@@ -19,6 +19,10 @@ NTFY_URL="${NTFY_URL:-https://ntfy.sh}"
 
 args=(-fsS --max-time 10 -H "Title: $title" -H "Priority: $prio")
 [ -n "$tags" ] && args+=(-H "Tags: $tags")
-[ -n "${NTFY_TOKEN:-}" ] && args+=(-H "Authorization: Bearer $NTFY_TOKEN")
 
-curl "${args[@]}" -d "$body" "$NTFY_URL/$NTFY_TOPIC" >/dev/null
+# URL (topic) and token go to curl on stdin so they never appear in argv / ps.
+case "$NTFY_URL$NTFY_TOPIC${NTFY_TOKEN:-}" in *[\"\\]*) echo "ntfy-send: quote or backslash in NTFY_* value" >&2; exit 1 ;; esac
+{
+  printf 'url = "%s/%s"\n' "$NTFY_URL" "$NTFY_TOPIC"
+  if [ -n "${NTFY_TOKEN:-}" ]; then printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN"; fi
+} | curl "${args[@]}" --data-raw "$body" --config - >/dev/null
