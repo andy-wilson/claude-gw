@@ -1,8 +1,7 @@
 {
-  "_comment": "Merged into each profile's CLAUDE_CONFIG_DIR/settings.json by `make deploy` (hooks and permissions keys replaced, everything else kept). Hook scripts live in /usr/local/lib/claude-rc/hooks.",
   "permissions": {
+    "disableBypassPermissionsMode": "disable",
     "deny": [
-      "Read(/home/cc-work/**)",
       "Read(/etc/claude-rc/**)",
       "Bash(sudo *)",
       "Bash(rm -rf /*)"
@@ -13,7 +12,11 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "/usr/local/lib/claude-rc/hooks/ntfy-notify.sh", "timeout": 15 }
+          {
+            "type": "command",
+            "command": "/usr/local/lib/claude-rc/hooks/ntfy-notify.sh",
+            "timeout": 15
+          }
         ]
       }
     ],
@@ -21,7 +24,11 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "/usr/local/lib/claude-rc/hooks/handover.sh", "timeout": 20 }
+          {
+            "type": "command",
+            "command": "/usr/local/lib/claude-rc/hooks/handover.sh",
+            "timeout": 20
+          }
         ]
       }
     ]

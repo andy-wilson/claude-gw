@@ -21,7 +21,7 @@ proxmox/     create-lxc.sh, snapshot.sh         run on the Proxmox host
 bootstrap/   bootstrap.sh, bootstrap-tailscale.sh, profile-login.sh   run in the container
 systemd/     claude-rc@.service, alert unit, health service + timer, sudoers
 bin/         rc-start, rc-health, rc-alert, ntfy-send   -> /usr/local/bin
-profiles/    settings.json (hooks + permissions), hooks/, workdir-CLAUDE.md
+profiles/    settings.json (-> /etc/claude-code/managed-settings.json), hooks/, workdir-CLAUDE.md
 etc/         *.env.example  -> copy to /etc/claude-rc/<profile>.env (never committed)
 docs/        design.md: architecture, components, DoD
 tests/       acceptance.md checklist; results/<tag>.md committed per release

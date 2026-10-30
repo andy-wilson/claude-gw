@@ -47,13 +47,12 @@ _install:
 	# Root-only dirs: profiles get their own pre-created log file and nothing else (no squatting, no symlinks).
 	chown root:root /var/log/claude-rc $(STATE_DIR); chmod 0755 /var/log/claude-rc; chmod 0700 $(STATE_DIR)
 	find $(STATE_DIR) -mindepth 1 \( ! -user root -o ! -type f \) -delete
-	# Merge managed keys (permissions, hooks) into each profile's settings.json; keep the rest.
+	# Hooks and deny rules as root-owned managed settings: they win over, and cannot be edited by, any profile.
+	install -d -m 0755 /etc/claude-code
+	install -m 0644 profiles/settings.json /etc/claude-code/managed-settings.json
 	for p in $(PROFILES); do
-	  set -a; . /etc/claude-rc/$$p.env; set +a
-	  # As the profile user: root must not write into a directory the profile controls (symlinks).
-	  sudo -u $$p install -d -m 0700 "$$CLAUDE_CONFIG_DIR"
-	  sudo -u $$p sh -ec 's="$$1/settings.json"; [ -f "$$s" ] || echo "{}" > "$$s"; jq --slurpfile m /dev/stdin ". * {permissions: \$$m[0].permissions, hooks: \$$m[0].hooks}" "$$s" > "$$s.tmp"; mv "$$s.tmp" "$$s"; chmod 0600 "$$s"' _ "$$CLAUDE_CONFIG_DIR" < profiles/settings.json
-	  chmod 0640 /etc/claude-rc/$$p.env; chgrp cc-lab /etc/claude-rc/$$p.env
+	  # Root-only: systemd reads it as root; no profile can read any env file, its own included (AT11).
+	  chown root:root /etc/claude-rc/$$p.env; chmod 0600 /etc/claude-rc/$$p.env
 	  l=/var/log/claude-rc/$$p.log
 	  if [ -L "$$l" ] || [ ! -f "$$l" ] || [ "$$(stat -c %U "$$l")" != "$$p" ]; then
 	    rm -f "$$l"; install -o $$p -g cc-lab -m 0600 /dev/null "$$l"

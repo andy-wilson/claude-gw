@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# Starts the Remote Control server for one profile. Normally exec'd by tmux
-# from claude-rc@.service; can be run by hand as the profile user for debugging:
-#   PROFILE=cc-home rc-start
-# All settings come from /etc/claude-rc/$PROFILE.env (loaded by systemd, or here).
+# Starts the Remote Control server for one profile. Exec'd by tmux from claude-rc@.service,
+# which loads /etc/claude-rc/$PROFILE.env (root-only) into the environment.
+# To watch it: sudo -u <profile> tmux -L rc-<profile> attach
 set -euo pipefail
 
 PROFILE="${PROFILE:-$(id -un)}"
-if [ -z "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "/etc/claude-rc/$PROFILE.env" ]; then
-  set -a
-  # shellcheck source=/dev/null
-  . "/etc/claude-rc/$PROFILE.env"
-  set +a
-fi
 : "${CLAUDE_CONFIG_DIR:?}" "${WORKDIR:?}"
 export CLAUDE_CONFIG_DIR
 
