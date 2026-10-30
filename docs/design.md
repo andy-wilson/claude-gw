@@ -151,6 +151,18 @@ One ntfy topic per profile on ntfy.sh with an access token. Alert bodies carry o
 
 The `Notification` hook duplicates Claude's own push notifications on purpose: ntfy still works if the Remote Control connection is the thing that broke. A `Stop` hook (`profiles/hooks/handover.sh`) writes the session's last state to `HANDOVER.md` in its working tree, so a fresh session can pick up where a stale one left off.
 
+### Egress firewall
+
+`proxmox/firewall.sh` puts a Proxmox firewall on the container's network interface. It runs on the host, so nothing inside the container, root included, can turn it off. Inbound, only SSH from `LAN_CIDR`, Tailscale's UDP port and ping from private ranges are accepted. Outbound, the container may reach its DNS resolver, the hosts in the `lab_allow` IP set (all ports), and the internet on TCP 22/80/443 and Tailscale's UDP ports; every other private address is dropped, the Proxmox host included.
+
+| Command (on the host) | Effect |
+| --- | --- |
+| `enable <ctid>` | First time: writes `/etc/pve/firewall/<ctid>.fw` from `LAN_CIDR` and `DNS`, turns on the datacenter firewall with ACCEPT policies and the host's own firewall off (so only this container is affected), and sets `firewall=1` on `net0`. After that it only flips the container's `enable` option |
+| `disable <ctid>` | Prints what a session could then reach, asks for the CTID to be typed, logs to the host syslog. `status` shows DISABLED until it is re-enabled |
+| `allow` / `remove <ctid> <ip\|cidr>`, `list` | Edits `lab_allow`. IPv4 only, /16 at widest, and the Proxmox host's own addresses need `FORCE=1` |
+
+The firewall cannot see inside the Tailscale tunnel, so what the gateway can reach on the tailnet is set by the Tailscale policy: tag the node `tag:claude-gw`, allow the owner's devices to its port 22 (and 443 for `rcctl`), and give the tag no outbound access. Exfiltration over HTTPS to any internet address remains possible; closing that would need a domain allowlist through a proxy.
+
 ### Managed Claude settings
 
 `make deploy` installs `profiles/settings.json` as `/etc/claude-code/managed-settings.json`. Managed settings are root-owned and take precedence over anything a profile or project sets, so a session cannot remove the hooks or deny rules, and `disableBypassPermissionsMode` blocks `bypassPermissions` outright. Each profile's own `settings.json` (plugins, MCP config, its approvals) is left alone. Isolation between profiles is enforced by the OS (separate users, `ProtectHome`, 0700 config and working directories, root-only env files), not by these rules.
@@ -194,6 +206,7 @@ The gateway has no inbound ports on the internet; the only ways in are Anthropic
 | Blast radius of a bad prompt | Each profile is a separate unprivileged user; one dedicated share at `/mnt/lab` is the only lab filesystem mounted; cloud and hypervisor credentials scoped to lab-only roles |
 | Secrets at rest | Credentials in each profile's config dir (0700); ntfy tokens in `/etc/claude-rc/*.env` (0600 root), never in git. A profile's own sessions can still see its ntfy topic and token in their environment, because the notification hook needs them; use a token that can only publish to that topic |
 | Host | Unprivileged LXC; no other bind mounts |
+| Network reach | Egress firewall on the host (`proxmox/firewall.sh`): DNS, the internet on 22/80/443 and lab hosts on an allowlist; the rest of the LAN and the Proxmox host are dropped. Can be disabled, with a warning |
 | Audit | journald for the units, Claude's own transcripts per profile, and (phase 3) `rcctl` logs every action with the requesting Tailscale identity |
 
 ### If Anthropic, the account or Claude Code is compromised
@@ -210,7 +223,7 @@ The gateway's purpose is to let a remote service run commands inside a private n
 What a compromised gateway can reach is everything the profile's Linux user can reach, because that is the only boundary not owned by Anthropic:
 
 - `/mnt/lab` read-write: read, exfiltrate, encrypt or delete it, and plant files that prompt-inject later sessions.
-- The network: the container sits on the LAN bridge and the tailnet with unrestricted egress, so it can scan and attack other LAN hosts, other tailnet nodes the Tailscale ACLs allow, and anything on the internet.
+- The network: the container sits on the LAN bridge and the tailnet with unrestricted egress unless the egress firewall is on, so it can scan and attack other LAN hosts, other tailnet nodes the Tailscale ACLs allow, and anything on the internet.
 - Credentials in the profile's home: the claude.ai login, the profile's ntfy token, and any SSH keys or cloud credentials placed there, which turn into lateral movement to those hosts and accounts.
 - Persistence as that user: user crontab, shell rc files, git hooks in the worktrees, modified files in `/mnt/lab`.
 
@@ -218,7 +231,7 @@ What it cannot reach without a further local or kernel exploit: root in the cont
 
 Mitigations, roughly in order of value:
 
-1. **Restrict egress** (not yet implemented): Proxmox firewall on the container, default-deny to the LAN, allowing only the lab hosts sessions actually need, plus outbound HTTPS. Tag the gateway in Tailscale and give the tag no access to other nodes. This is what turns "inside the private network" into "inside one share and a short list of hosts".
+1. **Restrict egress**: `proxmox/firewall.sh enable` (see "Egress firewall" above), with `lab_allow` holding only the lab hosts sessions actually need. Tag the gateway in Tailscale and give the tag no access to other nodes. This is what turns "inside the private network" into "inside one share and a short list of hosts".
 2. **Scope credentials**: only lab-only, least-privilege keys in profile homes; on target hosts, restrict them (`from=`, a non-root account, forced commands where possible). No cloud admin credentials.
 3. **Keep the share recoverable**: ZFS snapshots of the share dataset on the host, which the container cannot delete.
 4. **Updates**: the nightly `rc-update` timer is off by default. Enabling it, or installing `latest` on release day, shortens the window between a malicious npm release and it running here; `CLAUDE_CHANNEL=stable`, or pinning a version and updating by hand after a few days, lengthens it.
@@ -265,6 +278,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 | AT14 | A broken release rolls back within 2 min | 3 |
 | AT15 | Trusted Devices enforced on an un-enrolled browser | 1 |
 | AT16 | Claude Code update installs, and a bad one reverts with an alert | 2 |
+| AT17 | Egress firewall drops the LAN and the Proxmox host, allows the internet and listed hosts; disabling it warns and is logged | 2 |
 
 Non-functional: idle CPU under 5 %, memory under 1.5 GB with servers idle, nothing listening on the LAN except Tailscale and filtered sshd, and bootstrap from a fresh LXC to AT1 under 20 minutes excluding the interactive logins.
 
@@ -277,7 +291,7 @@ flowchart LR
   p1["Phase 1: Usable<br/>LXC, bootstrap, one profile,<br/>systemd + tmux, Tailscale, ntfy"]
   g1{{"Gate: AT1-3, AT9, AT15"}}
   p2["Phase 2: Resilient<br/>health timer, alert paths,<br/>notification hooks, updates"]
-  g2{{"Gate: AT4-8, AT13, AT16"}}
+  g2{{"Gate: AT4-8, AT13, AT16-17"}}
   p3["Phase 3: Operable<br/>rcctl control page,<br/>rollback drill"]
   g3{{"Gate: AT10, AT14"}}
   p4["Phase 4: Second account<br/>optional work profile"]

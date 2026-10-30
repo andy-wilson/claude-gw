@@ -18,7 +18,7 @@ Architecture diagrams, component design, security model, change control, definit
 ## Layout
 
 ```
-proxmox/     create-lxc.sh, snapshot.sh         run on the Proxmox host
+proxmox/     create-lxc.sh, snapshot.sh, firewall.sh   run on the Proxmox host
 bootstrap/   bootstrap.sh, bootstrap-tailscale.sh, profile-login.sh   run in the container
 systemd/     claude-rc@.service, alert unit, health and update services + timers, sudoers
 bin/         rc-start, rc-health, rc-alert, rc-update, ntfy-send   -> /usr/local/bin
@@ -35,6 +35,7 @@ On the Proxmox host, with a dedicated directory to share with the gateway (it be
 
 ```bash
 CTID=<ctid> STORAGE=local-lvm TEMPLATE=debian-12-standard_12.12-1_amd64.tar.zst LAB_SHARE=/<pool>/lab-share ./proxmox/create-lxc.sh
+LAN_CIDR=192.168.1.0/24 DNS=<resolver> ./proxmox/firewall.sh enable <ctid>   # egress firewall; DNS is the resolver the container gets from DHCP
 ```
 
 In the container (`pct enter <ctid>` or SSH as root):
@@ -66,6 +67,8 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Re-auth a claude.ai connector | `sudo -u cc-home env CLAUDE_CONFIG_DIR=/home/cc-home/.claude-cc-home claude mcp login "<name>" --no-browser` |
 | Update Claude Code | `rc-update` (newer `latest` only; `CLAUDE_CHANNEL=stable rc-update` for the slower channel) or `rc-update <version>` (any version, including back); restarts the servers and reverts if unhealthy |
 | Auto-update nightly (opt-in) | `systemctl enable --now claude-rc-update.timer` (`disable --now` to stop); ntfy low on success, high on revert |
+| Egress firewall | `proxmox/firewall.sh status\|enable\|disable <ctid>` (host). Off means sessions can reach your whole LAN and the Proxmox host; `disable` says so and asks you to type the CTID |
+| Let sessions reach a LAN host | `proxmox/firewall.sh allow <ctid> <ip\|cidr> [comment]` (host, all ports, /16 at widest); `remove`, `list` |
 
 ## Alerts
 
