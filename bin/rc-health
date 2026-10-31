@@ -51,8 +51,11 @@ for p in "${profiles[@]}"; do
   if [ -n "$fatal" ]; then
     echo "$p: degraded ($fatal)"
     if [ "$degraded" != "$fatal" ]; then
-      PROFILE=$p rc-alert degraded "$fatal" || true
-      jq --arg f "$fatal" '.degraded=$f | .alerted=true' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+      # rc-alert exits 3 when silenced: leave the state as is so it alerts after the silence.
+      s=0; PROFILE=$p rc-alert degraded "$fatal" || s=$?
+      if [ $s != 3 ]; then
+        jq --arg f "$fatal" '.degraded=$f | .alerted=true' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+      fi
     fi
     # A restart clears a transient; a real auth problem will show the same pattern again (no re-alert).
     sudo -u "$p" truncate -s 0 "$LOG_DIR/$p.log" || true
@@ -64,8 +67,8 @@ for p in "${profiles[@]}"; do
   echo "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
   systemctl restart "claude-rc@$p" || true
   if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
-    PROFILE=$p rc-alert down "$misses" || true
-    alerted=true
+    s=0; PROFILE=$p rc-alert down "$misses" || s=$?
+    [ $s = 3 ] || alerted=true
   fi
   jq --argjson m "$misses" --argjson a "$alerted" '.misses=$m | .alerted=$a' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
 done
