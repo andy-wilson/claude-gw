@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Read a profile's sessions and worktrees for rcctl, and prune finished worktrees. Run as root
+# via sudo (exact commands in systemd/sudoers.d/claude-rc); it re-runs itself as the profile,
+# because profile directories are 0700 and root must not follow paths the profile controls.
+#   rc-inspect <profile> sessions    newest transcripts: time, session, project, first prompt
+#   rc-inspect <profile> worktrees   each worktree: merged, clean, in use, branch, path
+#   rc-inspect <profile> prune       remove worktrees that are merged, clean and not in use
+set -euo pipefail
+
+sessions() {  # <config dir>
+  cd "$1/projects" 2>/dev/null || { echo "no sessions yet"; return; }
+  printf '%-16s  %-36s  %s\n' UPDATED SESSION 'PROJECT / FIRST PROMPT'
+  # Paths keep their ./ prefix: project directories start with "-", which commands read as options.
+  find . -mindepth 2 -maxdepth 2 -name '*.jsonl' -printf '%T@ %p\n' | sort -rn | awk 'NR <= 20' |
+  while read -r _ f; do
+    prompt="$(jq -rn 'first(inputs | select(.type == "user" and (.message.content | type) == "string") | .message.content) // ""' "$f" 2>/dev/null | tr -s '\t\r\n' '   ' | cut -c1-100)"
+    id="${f##*/}"; project="${f#./}"
+    printf '%-16s  %-36s  %s\n' "$(date -r "$f" '+%F %H:%M')" "${id%.jsonl}" "${project%%/*}"
+    printf '%-16s  %-36s  %s\n' '' '' "${prompt:-(none)}"
+  done
+}
+
+# One tab-separated line per linked worktree: path, branch, merged, clean, in use. In use means
+# one of the profile's processes (a live session) has its cwd inside it.
+scan() {  # <workdir>
+  cd "$1"
+  local base cwds path branch merged clean inuse
+  base="$(git rev-parse --abbrev-ref HEAD)"
+  cwds="$(for c in /proc/[0-9]*/cwd; do readlink "$c" || true; done 2>/dev/null)"
+  git worktree list --porcelain |
+    awk '/^worktree /{p=substr($0,10); b=""} /^branch /{b=substr($0,19)} /^$/{if (n++) print p "\t" b}' |
+  while IFS=$'\t' read -r path branch; do
+    merged=no; [ -n "$branch" ] && git merge-base --is-ancestor "refs/heads/$branch" "$base" && merged=yes
+    clean=no; [ -d "$path" ] && [ -z "$(git -C "$path" status --porcelain)" ] && clean=yes
+    inuse=no; printf '%s\n' "$cwds" | awk -v p="$path" '$0 == p || index($0, p "/") == 1 {f=1} END {exit !f}' && inuse=yes
+    printf '%s\t%s\t%s\t%s\t%s\n' "$path" "${branch:-(detached)}" "$merged" "$clean" "$inuse"
+  done
+}
+
+worktrees() {
+  scan "$1" | awk -F'\t' 'BEGIN {printf "%-6s  %-5s  %-6s  %-40s  %s\n", "MERGED", "CLEAN", "IN USE", "BRANCH", "PATH"}
+    {printf "%-6s  %-5s  %-6s  %-40s  %s\n", $3, $4, $5, $2, $1; n++} END {if (!n) print "no worktrees"}'
+}
+
+# git itself refuses to remove a dirty worktree or delete an unmerged branch: each check holds twice.
+prune() {
+  local n=0 path branch
+  while IFS=$'\t' read -r path branch; do
+    git -C "$1" worktree remove "$path" && git -C "$1" branch -d "$branch" >/dev/null && echo "removed $branch" && n=$((n + 1))
+  done < <(scan "$1" | awk -F'\t' '$3 == "yes" && $4 == "yes" && $5 == "no" {print $1 "\t" $2}')
+  echo "pruned $n worktree(s)"
+}
+
+if [ "${1:-}" = --as-profile ]; then  # <cmd> <config dir> <workdir>, already the profile user
+  case "$2" in sessions) sessions "$3" ;; worktrees) worktrees "$4" ;; prune) prune "$4" ;; esac
+  exit
+fi
+
+PROFILE="${1:?profile}"; cmd="${2:?sessions|worktrees|prune}"
+[[ $PROFILE =~ ^[a-z0-9-]+$ ]] || { echo "bad profile" >&2; exit 2; }
+case "$cmd" in sessions|worktrees|prune) ;; *) echo "unknown command $cmd" >&2; exit 2 ;; esac
+# Only the two paths reach the profile, not the ntfy token.
+env_file="/etc/claude-rc/$PROFILE.env"
+config="$(sed -n 's/^CLAUDE_CONFIG_DIR=//p' "$env_file")"; workdir="$(sed -n 's/^WORKDIR=//p' "$env_file")"
+: "${config:?no CLAUDE_CONFIG_DIR in $env_file}" "${workdir:?no WORKDIR in $env_file}"
+cd /
+exec runuser -u "$PROFILE" -- env -i PATH=/usr/bin:/bin HOME="/home/$PROFILE" "$(readlink -f "$0")" --as-profile "$cmd" "$config" "$workdir"

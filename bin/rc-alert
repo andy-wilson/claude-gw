@@ -11,6 +11,13 @@ kind="${1:?kind}"; arg="${2:-}"
 PROFILE="${PROFILE:?PROFILE unset}"
 HOST="$(hostname -s)"
 
+# rcctl's Silence button writes an end time here. It never holds back the urgent alert.
+until="$(cat /var/lib/rcctl/silence-until 2>/dev/null || true)"
+if [ "$kind" != unit-failed ] && [[ $until =~ ^[0-9]+$ ]] && [ "$until" -gt "$(date +%s)" ]; then
+  echo "rc-alert: $kind for $PROFILE silenced until $(date -d "@$until" -Is)"
+  exit 0
+fi
+
 case "$kind" in
   unit-failed)
     # No log lines in the body (design: nothing lab-specific leaves the house).

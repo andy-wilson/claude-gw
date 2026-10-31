@@ -43,7 +43,7 @@ _preflight:
 
 _install:
 	install -d $(PREFIX)/bin $(HOOK_DIR) $(STATE_DIR) /var/log/claude-rc /etc/claude-rc
-	install -m 0755 bin/rc-start bin/rc-health bin/rc-alert bin/rc-update bin/ntfy-send $(PREFIX)/bin/
+	install -m 0755 bin/rc-start bin/rc-health bin/rc-alert bin/rc-update bin/rc-inspect bin/ntfy-send $(PREFIX)/bin/
 	install -m 0755 profiles/hooks/*.sh $(HOOK_DIR)/
 	install -m 0644 systemd/claude-rc@.service systemd/claude-rc-alert@.service \
 	                systemd/claude-rc-health.service systemd/claude-rc-health.timer \

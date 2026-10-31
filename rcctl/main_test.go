@@ -7,7 +7,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
+
+var testNow = time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 
 // testApp: one enabled profile (cc-home); remote address picks the caller identity.
 func testApp(t *testing.T) (*app, *[]string) {
@@ -34,6 +37,9 @@ func testApp(t *testing.T) (*app, *[]string) {
 		},
 		run: func(_ context.Context, name string, args ...string) (string, error) {
 			calls = append(calls, name+" "+strings.Join(args, " "))
+			if name == "sudo" && len(args) == 4 && args[1] == inspect {
+				return "<b>" + args[3] + " output</b>", nil
+			}
 			if name == "systemctl" {
 				return "ActiveState=active\nSubState=running\nNRestarts=0\nMemoryCurrent=314572800\nActiveEnterTimestamp=Thu 2026-10-30 12:02:11 GMT\n", nil
 			}
@@ -41,6 +47,8 @@ func testApp(t *testing.T) (*app, *[]string) {
 		},
 		wants: wants,
 		etc:   t.TempDir(),
+		state: t.TempDir(),
+		now:   func() time.Time { return testNow },
 	}
 	return a, &calls
 }
@@ -120,5 +128,65 @@ func TestParseShow(t *testing.T) {
 	}
 	if mib(kv["MemoryCurrent"]) != "-" {
 		t.Errorf("mib of [not set]: %q", mib(kv["MemoryCurrent"]))
+	}
+}
+
+func TestDetail(t *testing.T) {
+	a, calls := testApp(t)
+	w := do(a, "GET", "/worktrees/cc-home", "owner:1", false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "&lt;b&gt;worktrees output") || !strings.Contains(w.Body.String(), "/prune/cc-home") {
+		t.Errorf("worktrees page: %d %s", w.Code, w.Body)
+	}
+	if got := (*calls)[len(*calls)-1]; got != "sudo -n /usr/local/bin/rc-inspect cc-home worktrees" {
+		t.Errorf("worktrees ran %q", got)
+	}
+	if w := do(a, "GET", "/sessions/cc-home", "owner:1", false); strings.Contains(w.Body.String(), "/prune/") {
+		t.Error("sessions page offers prune")
+	}
+	if w := do(a, "GET", "/sessions/cc-work", "owner:1", false); w.Code != 404 {
+		t.Errorf("unknown profile: %d", w.Code)
+	}
+	if w := do(a, "GET", "/sessions/cc-home", "other:1", false); w.Code != 403 {
+		t.Errorf("other login: %d", w.Code)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	a, calls := testApp(t)
+	if w := do(a, "POST", "/prune/cc-home", "owner:1", false); w.Code != 403 {
+		t.Errorf("headerless prune: %d", w.Code)
+	}
+	if w := do(a, "POST", "/prune/cc-home", "owner:1", true); w.Code != 200 || !strings.Contains(w.Body.String(), "prune output") {
+		t.Errorf("prune: %d %s", w.Code, w.Body)
+	}
+	if got := (*calls)[len(*calls)-1]; got != "sudo -n /usr/local/bin/rc-inspect cc-home prune" {
+		t.Errorf("prune ran %q", got)
+	}
+}
+
+func TestSilence(t *testing.T) {
+	a, _ := testApp(t)
+	f := a.state + "/" + silenceFile
+	if w := do(a, "POST", "/silence/60", "owner:1", false); w.Code != 403 {
+		t.Errorf("headerless silence: %d", w.Code)
+	}
+	if w := do(a, "POST", "/silence/5", "owner:1", true); w.Code != 404 {
+		t.Errorf("odd length: %d", w.Code)
+	}
+	if w := do(a, "POST", "/silence/60", "owner:1", true); w.Code != 200 {
+		t.Fatalf("silence: %d %s", w.Code, w.Body)
+	}
+	if b, _ := os.ReadFile(f); strings.TrimSpace(string(b)) != "1793451600" {
+		t.Errorf("silence file %q, want now+1h", b)
+	}
+	if body := do(a, "GET", "/", "owner:1", false).Body.String(); !strings.Contains(body, "Silenced until") {
+		t.Error("page does not show the silence")
+	}
+	do(a, "POST", "/silence/0", "owner:1", true)
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Errorf("silence file still there: %v", err)
+	}
+	if body := do(a, "GET", "/", "owner:1", false).Body.String(); strings.Contains(body, "Silenced until") {
+		t.Error("page still shows the silence")
 	}
 }

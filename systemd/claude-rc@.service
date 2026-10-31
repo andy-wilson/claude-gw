@@ -15,6 +15,9 @@ OnFailure=claude-rc-alert@%i.service
 Type=forking
 User=%i
 Group=cc-lab
+# tmux records each pane in utmp through the setgid utempter helper, which NoNewPrivileges disables
+# ("utempter: pututline: Permission denied"); the group lets it write utmp directly.
+SupplementaryGroups=utmp
 EnvironmentFile=/etc/claude-rc/%i.env
 Environment=PROFILE=%i
 # The profile cannot write the global npm install; updates go through rc-update instead.
