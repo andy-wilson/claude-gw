@@ -265,7 +265,7 @@ Rules:
 
 ## Definition of done and acceptance tests
 
-Done means every test for the phase passes on the deployed tag, from a device that is off the home network where the test says so, and the results are committed under `tests/results/<tag>.md`. The full checklist, with methods and pass criteria, is [`tests/acceptance.md`](../tests/acceptance.md). In summary:
+Done means every test for the phase passes on the deployed tag, from a device that is off the home network where the test says so, and the results are committed under `tests/results/<tag>.md`. Opt-in tests (AT17, the egress firewall) count only for a gateway where the feature is enabled. The full checklist, with methods and pass criteria, is [`tests/acceptance.md`](../tests/acceptance.md). In summary:
 
 | ID | Test | Phase |
 | --- | --- | --- |
@@ -285,7 +285,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 | AT14 | A broken release rolls back within 2 min | 3 |
 | AT15 | Trusted Devices enforced on an un-enrolled browser | 1 |
 | AT16 | Claude Code update installs, and a bad one reverts with an alert | 2 |
-| AT17 | Egress firewall drops the LAN and the Proxmox host, allows the internet and listed hosts; disabling it warns and is logged | 2 |
+| AT17 | Egress firewall drops the LAN and the Proxmox host, allows the internet and listed hosts; disabling it warns and is logged | 2, opt-in |
 
 Non-functional: idle CPU under 5 %, memory under 1.5 GB with servers idle, nothing listening on the LAN except Tailscale and filtered sshd, and bootstrap from a fresh LXC to AT1 under 20 minutes excluding the interactive logins.
 
@@ -298,7 +298,7 @@ flowchart LR
   p1["Phase 1: Usable<br/>LXC, bootstrap, one profile,<br/>systemd + tmux, Tailscale, ntfy"]
   g1{{"Gate: AT1-3, AT9, AT15"}}
   p2["Phase 2: Resilient<br/>health timer, alert paths,<br/>notification hooks, updates"]
-  g2{{"Gate: AT4-8, AT13, AT16-17"}}
+  g2{{"Gate: AT4-8, AT13, AT16"}}
   p3["Phase 3: Operable<br/>rcctl control page,<br/>rollback drill"]
   g3{{"Gate: AT10, AT14"}}
   p4["Phase 4: Second account<br/>optional work profile"]
