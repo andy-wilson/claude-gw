@@ -1,9 +1,13 @@
-# Lets the rcctl service user restart profile units and run rc-update, and nothing else.
+# Lets the rcctl service user restart profile units, run rc-update, and read and prune a
+# profile's sessions and worktrees through rc-inspect, and nothing else.
 # Install with: install -m 0440 systemd/sudoers.d/claude-rc /etc/sudoers.d/claude-rc
 # Exact commands only: a sudoers `*` also matches extra arguments (other units). One line per profile.
 Cmnd_Alias CLAUDE_RC = /usr/bin/systemctl start claude-rc@cc-home.service, \
                        /usr/bin/systemctl stop claude-rc@cc-home.service, \
                        /usr/bin/systemctl restart claude-rc@cc-home.service, \
                        /usr/bin/systemctl reset-failed claude-rc@cc-home.service, \
-                       /usr/bin/systemctl start --no-block claude-rc-update.service
+                       /usr/bin/systemctl start --no-block claude-rc-update.service, \
+                       /usr/local/bin/rc-inspect cc-home sessions, \
+                       /usr/local/bin/rc-inspect cc-home worktrees, \
+                       /usr/local/bin/rc-inspect cc-home prune
 rcctl ALL=(root) NOPASSWD: CLAUDE_RC

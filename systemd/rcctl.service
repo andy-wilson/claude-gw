@@ -18,7 +18,8 @@ Restart=on-failure
 RestartSec=10
 # No NoNewPrivileges: restart and update go through sudo (systemd/sudoers.d/claude-rc).
 ProtectSystem=full
-ProtectHome=yes
+# Read-only, not hidden: rc-inspect (via sudo, same namespace) reads profile transcripts.
+ProtectHome=read-only
 PrivateTmp=yes
 
 [Install]

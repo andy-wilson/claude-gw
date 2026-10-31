@@ -1,11 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="30">
-<title>claude-gw control</title>
-<style>
+{{define "style"}}<style>
   :root { --bg: #f7f7f8; --fg: #1d1d20; --muted: #6b6b73; --card: #fff; --line: #e2e2e6; --ok: #1a7f37; --bad: #c62828; --btn: #2f5bd3; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #16171b; --fg: #e8e8ec; --muted: #9a9aa3; --card: #202127; --line: #33343c; --ok: #4cc26a; --bad: #ef6b6b; --btn: #5b82f0; }
@@ -27,7 +20,28 @@
   button:disabled { opacity: .5; cursor: wait; }
   pre { margin: 0; overflow-x: auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
   #msg { min-height: 1.4em; }
-</style>
+</style>{{end -}}
+{{define "script"}}<script>
+  document.querySelectorAll("button[data-post]").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm(b.dataset.confirm)) return;
+    const msg = document.getElementById("msg");
+    b.disabled = true;
+    try {
+      const r = await fetch(b.dataset.post, { method: "POST", headers: { "X-Rcctl": "1" } });
+      msg.textContent = (await r.text()).trim();
+      if (r.ok) setTimeout(() => location.reload(), 3000);
+    } catch (e) { msg.textContent = String(e); }
+    b.disabled = false;
+  }));
+</script>{{end -}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>claude-gw control</title>
+{{template "style"}}
 </head>
 <body>
 <main>
@@ -47,6 +61,8 @@
       <div class="row">
         <button data-post="/restart/{{.Profile}}" data-confirm="Restart {{.Profile}}? Sessions on it reconnect.">Restart</button>
         <a class="button" href="/logs/{{.Profile}}">Logs</a>
+        <a class="button" href="/sessions/{{.Profile}}">Sessions</a>
+        <a class="button" href="/worktrees/{{.Profile}}">Worktrees</a>
       </div>
     </div>
     {{else}}
@@ -61,23 +77,21 @@
   </section>
 
   <section>
+    <h2>Alerts</h2>
+    <p class="muted">{{if .Silenced.IsZero}}On{{else}}Silenced until {{.Silenced.Format "15:04 Mon 2 Jan"}} (the urgent "not restarting" alert still sends){{end}}</p>
+    <div class="row">
+      <button data-post="/silence/60" data-confirm="Silence health alerts for 1 hour?">Silence 1 h</button>
+      <button data-post="/silence/240" data-confirm="Silence health alerts for 4 hours?">Silence 4 h</button>
+      {{if not .Silenced.IsZero}}<button data-post="/silence/0" data-confirm="Turn alerts back on?">Alerts on</button>{{end}}
+    </div>
+  </section>
+
+  <section>
     <h2>Update</h2>
     <div class="row"><button data-post="/update" data-confirm="Run rc-update? It restarts every server and reverts if they come back unhealthy.">Run rc-update</button></div>
     <pre>{{.Update}}</pre>
   </section>
 </main>
-<script>
-  document.querySelectorAll("button[data-post]").forEach(b => b.addEventListener("click", async () => {
-    if (!confirm(b.dataset.confirm)) return;
-    const msg = document.getElementById("msg");
-    b.disabled = true;
-    try {
-      const r = await fetch(b.dataset.post, { method: "POST", headers: { "X-Rcctl": "1" } });
-      msg.textContent = (await r.text()).trim();
-      if (r.ok) setTimeout(() => location.reload(), 3000);
-    } catch (e) { msg.textContent = String(e); }
-    b.disabled = false;
-  }));
-</script>
+{{template "script"}}
 </body>
 </html>

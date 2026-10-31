@@ -1,6 +1,7 @@
-// rcctl: tailnet-only control page for the claude-gw Remote Control servers (phase 3a).
+// rcctl: tailnet-only control page for the claude-gw Remote Control servers (phase 3).
 //
-// Panels: servers, health, logs. Actions: restart a profile's server, run rc-update.
+// Panels: servers, health, logs, sessions, worktrees. Actions: restart a profile's server, run
+// rc-update, prune finished worktrees, silence alerts.
 // Tailscale identity is the authentication: a caller must be an untagged node whose login is
 // in RCCTL_ALLOW. Runs as the unprivileged rcctl user; actions go through sudo rules limited
 // to exact commands (systemd/sudoers.d/claude-rc), and each one is logged with the caller.
@@ -9,12 +10,15 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,13 +30,20 @@ import (
 const (
 	wantsDir = "/etc/systemd/system/multi-user.target.wants"
 	etcDir   = "/etc/claude-rc"
+	inspect  = "/usr/local/bin/rc-inspect"
 )
+
+// silenceFile is read by rc-alert (as root): alerts other than the urgent one wait until then.
+const silenceFile = "silence-until"
+
+// Silence lengths offered on the page; 0 lifts it.
+var silenceMinutes = map[string]bool{"0": true, "60": true, "240": true}
 
 var unitRE = regexp.MustCompile(`^claude-rc@([a-z0-9-]+)\.service$`)
 
-//go:embed page.html
+//go:embed page.html detail.html
 var pageFS embed.FS
-var page = template.Must(template.ParseFS(pageFS, "page.html"))
+var page = template.Must(template.ParseFS(pageFS, "page.html", "detail.html"))
 
 type app struct {
 	allow map[string]bool
@@ -41,6 +52,8 @@ type app struct {
 	run   func(ctx context.Context, name string, args ...string) (string, error)
 	wants string
 	etc   string
+	state string // StateDirectory: holds the silence file
+	now   func() time.Time
 }
 
 type server struct {
@@ -113,6 +126,19 @@ func (a *app) file(name string) string {
 	return strings.TrimSpace(string(b))
 }
 
+// silencedUntil returns the end of the current silence, or the zero time.
+func (a *app) silencedUntil() time.Time {
+	b, err := os.ReadFile(filepath.Join(a.state, silenceFile))
+	if err != nil {
+		return time.Time{}
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil || n <= a.now().Unix() {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
+}
+
 func (a *app) journal(ctx context.Context, unit string, n int) string {
 	out, _ := a.run(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(n), "-o", "short-iso", "--no-pager")
 	return out
@@ -142,6 +168,10 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /logs/{profile}", a.auth(a.logs))
 	mux.HandleFunc("POST /restart/{profile}", a.auth(a.restart))
 	mux.HandleFunc("POST /update", a.auth(a.update))
+	mux.HandleFunc("GET /sessions/{profile}", a.auth(a.detail("sessions", "Sessions")))
+	mux.HandleFunc("GET /worktrees/{profile}", a.auth(a.detail("worktrees", "Worktrees")))
+	mux.HandleFunc("POST /prune/{profile}", a.auth(a.prune))
+	mux.HandleFunc("POST /silence/{minutes}", a.auth(a.silence))
 	return mux
 }
 
@@ -157,9 +187,10 @@ func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
 		"Claude":   a.file("CLAUDE_VERSION"),
 		"Health":   a.journal(r.Context(), "claude-rc-health.service", 12),
 		"Update":   a.journal(r.Context(), "claude-rc-update.service", 12),
-		"Rendered": time.Now().Format(time.RFC3339),
+		"Silenced": a.silencedUntil(),
+		"Rendered": a.now().Format(time.RFC3339),
 	}
-	if err := page.Execute(w, data); err != nil {
+	if err := page.ExecuteTemplate(w, "page.html", data); err != nil {
 		log.Printf("render: %v", err)
 	}
 }
@@ -174,6 +205,25 @@ func (a *app) logs(w http.ResponseWriter, r *http.Request, _ string) {
 	fmt.Fprint(w, a.journal(r.Context(), "claude-rc@"+p+".service", 300))
 }
 
+// detail shows rc-inspect's view of one profile (run as that profile; its directories are 0700).
+func (a *app) detail(cmd, title string) func(http.ResponseWriter, *http.Request, string) {
+	return func(w http.ResponseWriter, r *http.Request, _ string) {
+		p := r.PathValue("profile")
+		if !a.isProfile(p) {
+			http.NotFound(w, r)
+			return
+		}
+		out, err := a.run(r.Context(), "sudo", "-n", inspect, p, cmd)
+		if err != nil {
+			out += "\n(" + err.Error() + ")"
+		}
+		data := map[string]any{"Title": title, "Profile": p, "Body": out, "Prune": cmd == "worktrees"}
+		if err := page.ExecuteTemplate(w, "detail.html", data); err != nil {
+			log.Printf("render: %v", err)
+		}
+	}
+}
+
 // sudo -n runs only the exact commands in the sudoers file; anything else fails at once.
 func (a *app) action(w http.ResponseWriter, r *http.Request, login, what string, args ...string) {
 	out, err := a.run(r.Context(), "sudo", append([]string{"-n"}, args...)...)
@@ -182,7 +232,7 @@ func (a *app) action(w http.ResponseWriter, r *http.Request, login, what string,
 		http.Error(w, strings.TrimSpace(out), http.StatusInternalServerError)
 		return
 	}
-	fmt.Fprintf(w, "%s: ok\n", what)
+	fmt.Fprintf(w, "%s: ok\n%s", what, out)
 }
 
 func (a *app) restart(w http.ResponseWriter, r *http.Request, login string) {
@@ -198,6 +248,39 @@ func (a *app) restart(w http.ResponseWriter, r *http.Request, login string) {
 // the Update panel.
 func (a *app) update(w http.ResponseWriter, r *http.Request, login string) {
 	a.action(w, r, login, "rc-update", "/usr/bin/systemctl", "start", "--no-block", "claude-rc-update.service")
+}
+
+func (a *app) prune(w http.ResponseWriter, r *http.Request, login string) {
+	p := r.PathValue("profile")
+	if !a.isProfile(p) {
+		http.NotFound(w, r)
+		return
+	}
+	a.action(w, r, login, "prune "+p, inspect, p, "prune")
+}
+
+func (a *app) silence(w http.ResponseWriter, r *http.Request, login string) {
+	m := r.PathValue("minutes")
+	if !silenceMinutes[m] {
+		http.NotFound(w, r)
+		return
+	}
+	n, _ := strconv.Atoi(m)
+	f := filepath.Join(a.state, silenceFile)
+	var err error
+	if n == 0 {
+		if err = os.Remove(f); errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
+	} else {
+		err = os.WriteFile(f, []byte(strconv.FormatInt(a.now().Add(time.Duration(n)*time.Minute).Unix(), 10)+"\n"), 0o644)
+	}
+	log.Printf("action=%q by=%s from=%s err=%v", "silence "+m+"m", login, r.RemoteAddr, err)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "silence %s min: ok\n", m)
 }
 
 func main() {
@@ -236,6 +319,8 @@ func main() {
 		run:   run,
 		wants: wantsDir,
 		etc:   etcDir,
+		state: dir,
+		now:   time.Now,
 	}
 	log.Printf("rcctl listening on https://claude-gw-ctl (tailnet); allowed: %d login(s)", len(allow))
 	log.Fatal(http.Serve(ln, a.routes()))

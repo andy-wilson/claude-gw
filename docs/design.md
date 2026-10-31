@@ -171,18 +171,21 @@ The firewall cannot see inside the Tailscale tunnel, so what the gateway can rea
 
 A single Go binary (`rcctl/`) served only on the tailnet via `tsnet`, as its own tailnet node `claude-gw-ctl`, so no port is open on the LAN. Tailscale identity is the authentication: a request is served only if it comes from an untagged node whose login is in `RCCTL_ALLOW` (`/etc/default/rcctl`). Actions are POST only and need an `X-Rcctl` header, which a cross-site form or link cannot send, and each one is logged to the journal with the caller's login.
 
-It runs as an unprivileged `rcctl` user. It reads the journal through the `systemd-journal` group, and `DEPLOYED_TAG` and `CLAUDE_VERSION` by name (`/etc/claude-rc` is traverse-only; the env files stay 0600). Its two actions go through `sudo -n` with exact commands from `systemd/sudoers.d/claude-rc`; nothing else can be run that way. tsnet's log upload to Tailscale is turned off, and the first start prints a login URL to `journalctl -u rcctl` instead of storing an auth key. The tailnet needs HTTPS certificates turned on; note that the certificate puts the `claude-gw-ctl` hostname in public Certificate Transparency logs.
-
-Phase 3a (built):
+It runs as an unprivileged `rcctl` user. It reads the journal through the `systemd-journal` group, and `DEPLOYED_TAG` and `CLAUDE_VERSION` by name (`/etc/claude-rc` is traverse-only; the env files stay 0600). Restart, update and `rc-inspect` go through `sudo -n` with exact commands from `systemd/sudoers.d/claude-rc`; nothing else can be run that way. tsnet's log upload to Tailscale is turned off, and the first start prints a login URL to `journalctl -u rcctl` instead of storing an auth key. The tailnet needs HTTPS certificates turned on; note that the certificate puts the `claude-gw-ctl` hostname in public Certificate Transparency logs.
 
 | Panel | Data source | Actions |
 | --- | --- | --- |
 | Servers | `systemctl show claude-rc@<profile>`: state, since, restarts, memory | restart a profile |
 | Logs | `journalctl -u claude-rc@<profile>` | view |
+| Sessions | `rc-inspect <profile> sessions`: the 20 newest transcripts, with project and first prompt | view |
+| Worktrees | `rc-inspect <profile> worktrees`: branch, merged into `main`, clean, in use | prune the finished ones |
 | Health | `journalctl -u claude-rc-health`, deployed tag, Claude Code version | |
+| Alerts | `/var/lib/rcctl/silence-until` | silence for 1 h or 4 h, or turn back on |
 | Update | `journalctl -u claude-rc-update` | run `rc-update` (starts `claude-rc-update.service`) |
 
-Phase 3b (later, if needed): a Sessions panel from each profile's transcripts and a Worktrees panel with pruning of merged worktrees, both through a helper that runs as the profile user (profile directories are 0700), and silencing alerts for N minutes.
+`bin/rc-inspect` reads a profile's transcripts and worktrees. `rcctl` runs it through `sudo` with an exact command per profile and action, and it re-runs itself as the profile user (profile directories are 0700, and root must not follow paths a profile controls), passing on only the two paths from the env file, not the ntfy token. Prune removes a worktree only when its branch is merged into `main`, it has no uncommitted or untracked files, and none of the profile's processes has its working directory inside it; `git worktree remove` and `git branch -d` refuse dirty and unmerged work as a second check.
+
+Silencing writes an end time to `rcctl`'s own state directory, and `rc-alert` skips the high and low health alerts until then. The urgent "not restarting" alert always sends, and Claude's own permission-prompt notifications are not affected.
 
 The page is deliberately thin: Remote Control already provides the live session UI, so `rcctl` only covers what the Claude app cannot show (process state, logs) and what it cannot do (restart the server, update Claude Code).
 
@@ -208,7 +211,7 @@ The gateway has no inbound ports on the internet; the only ways in are Anthropic
 | --- | --- |
 | Session access from devices | Trusted Devices turned on for each account: each phone, browser and desktop app enrols, and a sign-in older than 18 h needs Face ID / Touch ID / passkey before it can steer a session |
 | SSH | Key auth only; `AllowUsers` limited to the tailnet ranges and `LAN_CIDR` (`bootstrap/bootstrap-tailscale.sh`) |
-| Control page (phase 3) | `tsnet` only (no LAN port); untagged nodes with a login in `RCCTL_ALLOW`; actions need the `X-Rcctl` header and are logged with the caller. Whoever controls an allowed Tailscale login can restart servers and run `rc-update` |
+| Control page (phase 3) | `tsnet` only (no LAN port); untagged nodes with a login in `RCCTL_ALLOW`; actions need the `X-Rcctl` header and are logged with the caller. Whoever controls an allowed Tailscale login can restart servers, run `rc-update`, read session first prompts, prune finished worktrees and silence the non-urgent alerts for up to 4 h |
 | What a session can do | `--permission-mode acceptEdits`, never `bypassPermissions`; destructive commands still prompt, and the prompt reaches the phone via push and ntfy |
 | Blast radius of a bad prompt | Each profile is a separate unprivileged user; one dedicated share at `/mnt/lab` is the only lab filesystem mounted; cloud and hypervisor credentials scoped to lab-only roles |
 | Secrets at rest | Credentials in each profile's config dir (0700); ntfy tokens in `/etc/claude-rc/*.env` (0600 root), never in git. A profile's own sessions can still see its ntfy topic and token in their environment, because the notification hook needs them; use a token that can only publish to that topic |
@@ -278,7 +281,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 | AT7 | Hard failure fires the urgent alert within 2 min | 2 |
 | AT8 | `kill -STOP` (hung process) caught by the health timer | 2 |
 | AT9 | Tailscale + SSH fallback attaches to the live server | 1 |
-| AT10 | Control page lists servers, health and logs; restart and update are logged with the caller; other logins and headerless POSTs get 403 | 3 |
+| AT10 | Control page lists servers, health, logs, sessions and worktrees; restart, update, prune and silence work and are logged with the caller; other logins and headerless POSTs get 403 | 3 |
 | AT11 | Account isolation enforced by the OS, not just Claude | 4 |
 | AT12 | Work account sees only its own server card | 4 |
 | AT13 | Permission prompt reaches the phone via push and ntfy | 2 |

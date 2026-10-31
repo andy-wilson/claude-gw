@@ -21,8 +21,8 @@ Architecture diagrams, component design, security model, change control, definit
 proxmox/     create-lxc.sh, snapshot.sh, firewall.sh   run on the Proxmox host
 bootstrap/   bootstrap.sh, bootstrap-tailscale.sh, profile-login.sh   run in the container
 systemd/     claude-rc@.service, alert unit, health and update services + timers, sudoers
-bin/         rc-start, rc-health, rc-alert, rc-update, ntfy-send   -> /usr/local/bin
-rcctl/       Go control page (phase 3a); make rcctl builds dist/rcctl
+bin/         rc-start, rc-health, rc-alert, rc-update, rc-inspect, ntfy-send -> /usr/local/bin
+rcctl/       Go control page (phase 3); make rcctl builds dist/rcctl
 profiles/    settings.json (-> /etc/claude-code/managed-settings.json), hooks/, workdir-CLAUDE.md
 etc/         claude-rc/*.env.example -> /etc/claude-rc/<profile>.env (never committed); default/rcctl.example
 docs/        design.md: architecture, components, DoD
@@ -71,6 +71,8 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Egress firewall | `proxmox/firewall.sh status\|enable\|disable <ctid>` (host). Off means sessions can reach your whole LAN and the Proxmox host; `disable` says so and asks you to type the CTID |
 | Let sessions reach a LAN host | `proxmox/firewall.sh allow <ctid> <ip\|cidr> [comment]` (host, all ports, /16 at widest); `remove`, `list` |
 | Control page (opt-in) | laptop: `make rcctl`, copy `dist/rcctl` to `/opt/claude-gw/dist/` in the container, `make deploy`. Then `cp etc/default/rcctl.example /etc/default/rcctl`, set `RCCTL_ALLOW` to your Tailscale login, `systemctl enable --now rcctl`, and open the login URL from `journalctl -u rcctl` once. Needs HTTPS certificates on in the tailnet. Page: `https://claude-gw-ctl.<tailnet>.ts.net` |
+| Silence health alerts | Control page, Alerts: 1 h or 4 h. The urgent "not restarting" alert still sends; permission-prompt notifications are not affected |
+| Clean up session worktrees | Control page, a profile's Worktrees: Prune removes each worktree that is merged into `main`, has no uncommitted or untracked files and no live session in it, and deletes its branch |
 
 ## Alerts
 
