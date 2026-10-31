@@ -12,11 +12,14 @@ PROFILE="${PROFILE:?PROFILE unset}"
 HOST="$(hostname -s)"
 
 # rcctl's Silence button writes an end time here. It never holds back the urgent alert.
+# Exit 3 tells rc-health the alert was not sent, so it sends it once the silence ends.
 until="$(cat /var/lib/rcctl/silence-until 2>/dev/null || true)"
-if [ "$kind" != unit-failed ] && [[ $until =~ ^[0-9]+$ ]] && [ "$until" -gt "$(date +%s)" ]; then
-  echo "rc-alert: $kind for $PROFILE silenced until $(date -d "@$until" -Is)"
-  exit 0
-fi
+case "$kind" in down|degraded|recovered)
+  if [[ $until =~ ^[0-9]+$ ]] && [ "$until" -gt "$(date +%s)" ]; then
+    echo "rc-alert: $kind for $PROFILE silenced until $(date -d "@$until" -Is)"
+    exit 3
+  fi ;;
+esac
 
 case "$kind" in
   unit-failed)
