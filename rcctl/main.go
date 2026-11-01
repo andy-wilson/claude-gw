@@ -40,6 +40,9 @@ const appURL = "https://claude.ai/code"
 // silenceFile is read by rc-alert (as root): alerts other than the urgent one wait until then.
 const silenceFile = "silence-until"
 
+// clearedFile holds when the alert history was last cleared; older entries are hidden, not deleted.
+const clearedFile = "alerts-cleared"
+
 // Silence lengths offered on the page; 0 lifts it.
 var silenceMinutes = map[string]bool{"0": true, "60": true, "240": true}
 
@@ -168,6 +171,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /session/{profile}/{id}", a.auth(a.sessionPage))
 	mux.HandleFunc("POST /prune/{profile}", a.auth(a.prune))
 	mux.HandleFunc("POST /silence/{minutes}", a.auth(a.silence))
+	mux.HandleFunc("POST /alerts/clear", a.auth(a.clearAlerts))
 	return mux
 }
 
@@ -213,6 +217,7 @@ func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
 		"Claude":    a.file("CLAUDE_VERSION"),
 		"Update":    a.journal(ctx, "claude-rc-update.service", 12),
 		"Silenced":  a.silencedUntil(),
+		"Cleared":   a.cleared(),
 		"Rendered":  a.now(),
 	}
 	if err := page.ExecuteTemplate(w, "page.html", data); err != nil {
@@ -282,6 +287,29 @@ func (a *app) prune(w http.ResponseWriter, r *http.Request, login string) {
 		return
 	}
 	a.action(w, r, login, "prune "+p, inspect, p, "prune")
+}
+
+// cleared returns when the alert history was last cleared, or the zero time.
+func (a *app) cleared() time.Time {
+	b, err := os.ReadFile(filepath.Join(a.state, clearedFile))
+	if err != nil {
+		return time.Time{}
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
+}
+
+func (a *app) clearAlerts(w http.ResponseWriter, r *http.Request, login string) {
+	err := os.WriteFile(filepath.Join(a.state, clearedFile), []byte(strconv.FormatInt(a.now().Unix(), 10)+"\n"), 0o644)
+	log.Printf("action=%q by=%s from=%s err=%v", "clear alert history", login, r.RemoteAddr, err)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintln(w, "alert history cleared")
 }
 
 func (a *app) silence(w http.ResponseWriter, r *http.Request, login string) {

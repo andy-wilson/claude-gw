@@ -316,3 +316,27 @@ func TestJournalRootOnly(t *testing.T) {
 		t.Errorf("want 2 journal reads by identifier, got %d", n)
 	}
 }
+
+func TestClearAlerts(t *testing.T) {
+	a, _, out := testApp(t)
+	out["journalctl -t rc-alert"] = journal(30, "profile=cc-home kind=recovered priority=low result=sent what=recovered")
+	if b := body(a, "/"); !strings.Contains(b, "/alerts/clear") || !strings.Contains(b, "recovered") {
+		t.Fatal("history and its Clear button should show")
+	}
+	if w := do(a, "POST", "/alerts/clear", "owner:1", false); w.Code != 403 {
+		t.Errorf("headerless clear: %d", w.Code)
+	}
+	if w := do(a, "POST", "/alerts/clear", "owner:1", true); w.Code != 200 {
+		t.Fatalf("clear: %d %s", w.Code, w.Body)
+	}
+	b := body(a, "/")
+	if strings.Contains(b, "/alerts/clear") || !strings.Contains(b, "No alerts since cleared at") {
+		t.Error("cleared history still shown")
+	}
+	// Alerts after the clear show again.
+	a.now = func() time.Time { return testNow.Add(-time.Hour) }
+	do(a, "POST", "/alerts/clear", "owner:1", true)
+	if !strings.Contains(body(a, "/"), "recovered") {
+		t.Error("an alert after the clear is hidden")
+	}
+}

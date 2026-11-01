@@ -72,6 +72,7 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Egress firewall | `proxmox/firewall.sh status\|enable\|disable <ctid>` (host). Off means sessions can reach your whole LAN and the Proxmox host; `disable` says so and asks you to type the CTID |
 | Let sessions reach a LAN host | `proxmox/firewall.sh allow <ctid> <ip\|cidr> [comment]` (host, all ports, /16 at widest); `remove`, `list` |
 | Control page (opt-in) | laptop: `make rcctl`, copy `dist/rcctl` to `/opt/claude-gw/dist/` in the container, `make deploy`. Then `cp etc/default/rcctl.example /etc/default/rcctl`, set `RCCTL_ALLOW` to your Tailscale login, `systemctl enable --now rcctl`, and open the login URL from `journalctl -u rcctl` once. Needs HTTPS certificates on in the tailnet. Page: `https://claude-gw-ctl.<tailnet>.ts.net` |
+| Tidy the alert history | Control page, Alerts: Clear history hides everything up to now (the journal keeps it); current problems stay |
 | Silence health alerts | Control page, Alerts: 1 h or 4 h. The urgent "not restarting" alert still sends; permission-prompt notifications are not affected |
 | Clean up session worktrees | Control page, Worktrees: Prune removes each worktree that is merged into `main`, has no changed, untracked or ignored files, and has no session in it or using it in the last 24 h, and deletes its branch |
 
@@ -81,7 +82,7 @@ ntfy.sh topic per profile (`NTFY_TOPIC` in the env file). Bodies are deliberatel
 
 | Priority | Source | Meaning |
 | --- | --- | --- |
-| urgent | `claude-rc-alert@` (systemd OnFailure) | Unit hit its restart limit; needs a human |
+| urgent | `claude-rc-alert@` (systemd OnFailure) | Unit hit its restart limit. Sent once per outage; `rc-health` keeps retrying every 2 min and sends "recovered" when it comes back |
 | high | `rc-health` | Two consecutive missed checks, or a fatal pattern in the log |
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle |
 | low | `rc-health` | Recovered |

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Alert paths for a profile. Called by claude-rc-alert@.service (unit-failed)
 # and by rc-health (down, recovered, degraded).
-#   rc-alert unit-failed            urgent: systemd gave up restarting
+#   rc-alert unit-failed            urgent: systemd gave up restarting (once per outage)
 #   rc-alert down <n>               high:   health check missed n times
 #   rc-alert degraded "<reason>"    high:   process alive but log shows a known fatal
 #   rc-alert recovered              low:    back after a down/degraded
@@ -47,6 +47,12 @@ if [ "$kind" = unit-failed ]; then
     echo "rc-alert: claude-rc@$PROFILE failed on the way to a restart and is running again; no urgent alert"
     exit 0
   fi
+  # rc-health resets the unit and retries every check, so it may hit the start limit again and
+  # again during one outage: send the urgent alert once, until rc-health records the recovery.
+  if [ "$(jq -r '.urgent // false' "/var/lib/claude-rc/health-$PROFILE.json" 2>/dev/null)" = true ]; then
+    echo "rc-alert: urgent alert for $PROFILE already sent for this outage"
+    exit 0
+  fi
 fi
 
 # Every attempt goes to the journal for rcctl's alert history (what= last: it may contain spaces).
@@ -67,7 +73,7 @@ if ntfy-send "$prio" "$title" "$body" "$tags"; then
   # next healthy check sends "recovered", as it does after its own alerts.
   if [ "$kind" = unit-failed ]; then
     st="/var/lib/claude-rc/health-$PROFILE.json"
-    { jq '.alerted = true' "$st" 2>/dev/null || echo '{"misses":0,"alerted":true,"degraded":""}'; } > "$st.tmp" && mv "$st.tmp" "$st"
+    { jq '.alerted = true | .urgent = true' "$st" 2>/dev/null || echo '{"misses":0,"alerted":true,"degraded":"","urgent":true}'; } > "$st.tmp" && mv "$st.tmp" "$st"
   fi
 else
   record failed

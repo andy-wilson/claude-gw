@@ -217,13 +217,14 @@ func (a *app) sessions(ctx context.Context, p string) []session {
 
 var alertRE = regexp.MustCompile(`^profile=(\S+) kind=(\S+) priority=(\S+) result=(\S+) what=(.*)$`)
 
-// alertHistory reads rc-alert's journal records for the last 24 h. rc-health retries a held-back
+// alertHistory reads rc-alert's journal records for the last 24 h, after the last Clear. rc-health retries a held-back
 // or failed alert every check, so consecutive identical attempts fold into one row.
 func (a *app) alertHistory(ctx context.Context) []alertRow {
 	var rows []alertRow
+	cleared := a.cleared()
 	for _, e := range a.journalJSON(ctx, rootOnly("rc-alert", "--since", "-24h")...) {
 		m := alertRE.FindStringSubmatch(e.Message)
-		if m == nil {
+		if m == nil || !e.At.After(cleared) {
 			continue
 		}
 		if n := len(rows); n > 0 {

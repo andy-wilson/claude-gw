@@ -30,7 +30,9 @@ check "urgent alert recorded as sent" '[ "$(last)" = "profile=cc-home kind=unit-
 check "urgent alert arms rc-health's recovery" '[ "$(jq -c .alerted /var/lib/claude-rc/health-cc-home.json)" = true ]'
 echo '{"misses":3,"alerted":false,"degraded":""}' > /var/lib/claude-rc/health-cc-home.json
 rc-alert unit-failed >/dev/null
-check "urgent alert keeps the rest of the state" '[ "$(jq -c "[.misses, .alerted]" /var/lib/claude-rc/health-cc-home.json)" = "[3,true]" ]'
+check "urgent alert keeps the rest of the state" '[ "$(jq -c "[.misses, .alerted, .urgent]" /var/lib/claude-rc/health-cc-home.json)" = "[3,true,true]" ]'
+n=$(grep -c "^urgent" /tmp/sent); rc-alert unit-failed >/dev/null
+check "urgent alert sent once per outage" '[ "$(grep -c "^urgent" /tmp/sent)" = "$n" ]'
 rm /var/lib/claude-rc/health-cc-home.json
 rm /var/lib/rcctl/silence-until
 NTFY_FAIL=1 rc-alert recovered; rc=$?
