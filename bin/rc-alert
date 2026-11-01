@@ -6,6 +6,8 @@
 #   rc-alert degraded "<reason>"    high:   process alive but log shows a known fatal
 #   rc-alert recovered              low:    back after a down/degraded
 set -euo pipefail
+# rc-alert and ntfy-send live here; `pct exec` and other bare shells leave it off PATH.
+export PATH="/usr/local/bin:$PATH"
 
 kind="${1:?kind}"; arg="${2:-}"
 PROFILE="${PROFILE:?PROFILE unset}"
