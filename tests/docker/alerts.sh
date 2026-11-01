@@ -26,7 +26,7 @@ FAILED=no rc-alert unit-failed >/dev/null; rc=$?
 check "no urgent alert when the unit is running again (forced restart)" '[ $rc = 0 ] && ! grep -q "^urgent" /tmp/sent 2>/dev/null'
 rc-alert unit-failed; rc=$?
 check "urgent alert sends through a silence" '[ $rc = 0 ] && grep -q "^urgent claude-gw: cc-home DOWN" /tmp/sent'
-check "urgent alert recorded as sent" '[ "$(last)" = "profile=cc-home kind=unit-failed priority=urgent result=sent what=DOWN, not restarting" ]'
+check "urgent alert recorded as sent" '[ "$(last)" = "profile=cc-home kind=unit-failed priority=urgent result=sent what=DOWN, retrying" ]'
 check "urgent alert arms rc-health's recovery" '[ "$(jq -c .alerted /var/lib/claude-rc/health-cc-home.json)" = true ]'
 echo '{"misses":3,"alerted":false,"degraded":""}' > /var/lib/claude-rc/health-cc-home.json
 rc-alert unit-failed >/dev/null
@@ -49,7 +49,13 @@ check "unknown kind exits 2" '[ $rc = 2 ]'
 touch /etc/systemd/system/multi-user.target.wants/claude-rc@cc-home.service
 cat > /stub/systemctl <<'X'
 #!/bin/sh
-case "$1" in is-active) echo "$ACTIVE"; [ "$ACTIVE" = active ];; show) echo /x;; *) :;; esac
+case "$1" in
+  is-active) echo "$ACTIVE"; [ "$ACTIVE" = active ];;
+  show) echo /x;;
+  # RACE: claude-rc-alert@ sends the urgent alert while rc-health is mid-check.
+  restart) [ -z "$RACE" ] || { f=/var/lib/claude-rc/health-cc-home.json; jq '.alerted=true | .urgent=true' $f > $f.t && mv $f.t $f; };;
+  *) :;;
+esac
 X
 printf '#!/bin/sh\ncase "$*" in *has-session*) [ "$ACTIVE" = active ];; *) :;; esac\n' > /stub/sudo
 printf '#!/bin/sh\n[ "$ACTIVE" = active ]\n' > /stub/pgrep
@@ -65,9 +71,15 @@ health inactive 0
 check "sent down alert sets alerted" '[ "$(state)" = "[3,true]" ]'
 health inactive 0
 check "no repeat once sent" '[ "$(grep -c down /tmp/alerts)" = 2 ]'
+jq '.urgent=true' /var/lib/claude-rc/health-cc-home.json > /tmp/s && mv /tmp/s /var/lib/claude-rc/health-cc-home.json
 health active 1
 check "failed recovery keeps the state" '[ "$(state)" = "[4,true]" ]'
+check "failed recovery still ends the outage for the urgent alert" '[ "$(jq -c .urgent /var/lib/claude-rc/health-cc-home.json)" = false ]'
 health active 0
 check "sent recovery resets the state" '[ "$(state)" = "[0,false]" ]'
+RACE=1 health inactive 3
+check "an urgent alert sent mid-check keeps alerted" '[ "$(state)" = "[1,true]" ]'
+health active 0
+check "so recovery is pushed after it" '[ "$(tail -n1 /tmp/alerts)" = recovered ] && [ "$(state)" = "[0,false]" ]'
 
 echo "$fails failure(s)"; exit $((fails > 0))

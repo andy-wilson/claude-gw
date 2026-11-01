@@ -187,7 +187,7 @@ func (a *app) status(ctx context.Context, p string, v verdict) server {
 	}
 	switch th := missAlertAt(); {
 	case kv["ActiveState"] == "failed":
-		s.Level, s.Problem, s.Since = levelBad, "down, not restarting", unixTS(kv["InactiveEnterTimestamp"])
+		s.Level, s.Problem, s.Since = levelBad, "down, retrying every 2 min", unixTS(kv["InactiveEnterTimestamp"])
 	case kv["ActiveState"] == "inactive" || kv["ActiveState"] == "":
 		s.Level, s.Problem, s.Since = levelBad, "stopped", unixTS(kv["InactiveEnterTimestamp"])
 	case kv["ActiveState"] != "active":
@@ -219,9 +219,8 @@ var alertRE = regexp.MustCompile(`^profile=(\S+) kind=(\S+) priority=(\S+) resul
 
 // alertHistory reads rc-alert's journal records for the last 24 h, after the last Clear. rc-health retries a held-back
 // or failed alert every check, so consecutive identical attempts fold into one row.
-func (a *app) alertHistory(ctx context.Context) []alertRow {
+func (a *app) alertHistory(ctx context.Context, cleared time.Time) []alertRow {
 	var rows []alertRow
-	cleared := a.cleared()
 	for _, e := range a.journalJSON(ctx, rootOnly("rc-alert", "--since", "-24h")...) {
 		m := alertRE.FindStringSubmatch(e.Message)
 		if m == nil || !e.At.After(cleared) {
