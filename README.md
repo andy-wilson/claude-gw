@@ -62,6 +62,7 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Back up before any change | `proxmox/snapshot.sh take <ctid> <slug>` (host, vzdump) |
 | Deploy a release | `git fetch --tags && make deploy TAG=vX.Y` |
 | Roll back | `make rollback` (previous tag) or `proxmox/snapshot.sh back <ctid> <volid>` (whole container) |
+| Know a deploy landed | `make deploy` and `make rollback` end with a 60 s wait, a health check and one push: low "claude-gw deployed <tag> (was <tag>)" when healthy, high "NOT healthy" when not |
 | Health / what is deployed | `make status` |
 | Watch a server's terminal | `sudo -u cc-home tmux -L rc-cc-home attach` (detach: `Ctrl-b d`) |
 | Re-run the interactive logins | `bootstrap/profile-login.sh cc-home` |

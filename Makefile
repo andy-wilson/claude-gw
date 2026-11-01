@@ -88,6 +88,12 @@ _restart:
 	done
 	# Opt-in: only restarted if already enabled and running (systemctl enable --now rcctl).
 	systemctl try-restart rcctl 2>/dev/null || true
+	# Announce the deploy (or rollback) once the servers have had a minute, so a planned restart
+	# reads as one on the phone. Here rather than in deploy: this recipe comes from the new tag.
+	echo "waiting 60 s, then a health check and the deploy notice"; sleep 60
+	now=$$(cat $(DEPLOYED)); was=$$(cat $(PREVIOUS) 2>/dev/null || echo none)
+	if $(PREFIX)/bin/rc-health; then kind=deployed; else kind=deploy-unhealthy; echo "WARNING: not healthy after the deploy; consider make rollback"; fi
+	for p in $(PROFILES); do PROFILE=$$p $(PREFIX)/bin/rc-alert $$kind "$$now (was $$was)" || true; done
 	sleep 3; systemctl --no-pager --plain status 'claude-rc@*' | head -n 40 || true
 
 rollback:

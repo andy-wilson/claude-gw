@@ -5,6 +5,8 @@
 #   rc-alert down <n>               high:   health check missed n times
 #   rc-alert degraded "<reason>"    high:   process alive but log shows a known fatal
 #   rc-alert recovered              low:    back after a down/degraded
+#   rc-alert deployed "<tag> (was <tag>)"           low:  make deploy, healthy afterwards
+#   rc-alert deploy-unhealthy "<tag> (was <tag>)"   high: make deploy, not healthy afterwards
 set -euo pipefail
 # rc-alert and ntfy-send live here; `pct exec` and other bare shells leave it off PATH.
 export PATH="/usr/local/bin:$PATH"
@@ -27,6 +29,12 @@ case "$kind" in
   recovered)
     prio=low; tags=white_check_mark; what="recovered"; title="claude-gw: $PROFILE recovered"
     body="claude-rc@$PROFILE on $HOST is healthy again." ;;
+  deployed)
+    prio=low; tags=package; what="deployed $arg, healthy"; title="claude-gw deployed $arg"
+    body="claude-rc@$PROFILE on $HOST restarted for the deploy and is healthy." ;;
+  deploy-unhealthy)
+    prio=high; tags=warning; what="deployed $arg, NOT healthy"; title="claude-gw deployed $arg: $PROFILE NOT healthy"
+    body="claude-rc@$PROFILE on $HOST is not healthy 60 s after the deploy. Consider make rollback." ;;
   *) echo "unknown kind $kind" >&2; exit 2 ;;
 esac
 

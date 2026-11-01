@@ -31,6 +31,11 @@ rm /var/lib/claude-rc/health-cc-home.json
 rm /var/lib/rcctl/silence-until
 NTFY_FAIL=1 rc-alert recovered; rc=$?
 check "failed send exits non-zero and is recorded" '[ $rc = 1 ] && [ "$(last)" = "profile=cc-home kind=recovered priority=low result=failed what=recovered" ]'
+rc-alert deployed "v0.6.3 (was v0.6.2)"; rc=$?
+check "deploy notice sent low and recorded" '[ $rc = 0 ] && grep -q "^low claude-gw deployed v0.6.3 (was v0.6.2)" /tmp/sent && [ "$(last)" = "profile=cc-home kind=deployed priority=low result=sent what=deployed v0.6.3 (was v0.6.2), healthy" ]'
+rc-alert deploy-unhealthy "v0.6.3 (was v0.6.2)"
+check "unhealthy deploy notice is high and says so" 'grep -q "^high claude-gw deployed v0.6.3 (was v0.6.2): cc-home NOT healthy" /tmp/sent'
+rm -f /var/lib/claude-rc/health-cc-home.json
 rc-alert bogus 2>/dev/null; rc=$?
 check "unknown kind exits 2" '[ $rc = 2 ]'
 
