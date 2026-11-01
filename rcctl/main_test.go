@@ -45,7 +45,7 @@ func testApp(t *testing.T) (*app, *[]string, fake) {
 	}
 	out := fake{
 		"systemctl show":                            showActive,
-		"journalctl -t rc-health":            journal(4, "cc-home: healthy"),
+		"journalctl -t rc-health":                   journal(4, "cc-home: healthy"),
 		"sudo -n " + inspect + " cc-home sessions":  sessionsJS,
 		"sudo -n " + inspect + " cc-home worktrees": "MERGED  CLEAN  IN USE  BRANCH  PATH\n<b>wt</b>\n",
 		"sudo -n " + inspect + " cc-home prune":     "pruned 0 worktree(s)\n",
@@ -297,5 +297,22 @@ func TestSilence(t *testing.T) {
 	}
 	if strings.Contains(body(a, "/"), "Silenced until") {
 		t.Error("page still shows the silence")
+	}
+}
+
+func TestJournalRootOnly(t *testing.T) {
+	a, calls, _ := testApp(t)
+	body(a, "/")
+	var n int
+	for _, c := range *calls {
+		if strings.HasPrefix(c, "journalctl -t ") {
+			n++
+			if !strings.Contains(c, " _UID=0 ") {
+				t.Errorf("journal read not limited to root: %q", c)
+			}
+		}
+	}
+	if n != 2 {
+		t.Errorf("want 2 journal reads by identifier, got %d", n)
 	}
 }
