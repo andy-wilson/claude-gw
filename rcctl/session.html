@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>claude-gw session</title>
+{{template "style"}}
+</head>
+<body>
+<main>
+  {{with .S}}
+  <header>
+    <a class="button" href="/">Back</a>
+    <a class="app" href="{{$.AppURL}}" title="Open the Claude app's sessions" aria-label="Open in the Claude app">↗</a>
+  </header>
+  <section>
+    <p class="headline">{{if .Prompt}}{{.Prompt}}{{else}}(new session){{end}}</p>
+    <p class="muted">{{if .Live}}In use now{{else}}Not in use{{end}} · last active <time datetime="{{rfc .Last}}" data-fmt="ago">{{rfc .Last}}</time>{{if not .StartedAt.IsZero}} · started <time datetime="{{rfc .StartedAt}}">{{rfc .StartedAt}}</time>{{end}}</p>
+    <p class="muted">{{.Profile}} · {{if .Cwd}}{{.Worktree}}{{else}}no working directory recorded{{end}}{{if .Branch}} · branch {{.Branch}}{{end}}{{if .Dirty}} · uncommitted changes{{end}}</p>
+    <p class="muted">↗ opens the Claude app's session list: the app's session links cannot be matched to this transcript reliably.</p>
+  </section>
+  <section>
+    <h2>Recent activity</h2>
+    {{range .Activity}}
+    <div class="item">
+      <div><span class="kind">{{if eq .Kind "user"}}You{{else if eq .Kind "assistant"}}Claude{{else}}Tool{{end}}</span>{{if not .At.IsZero}} <span class="muted"><time datetime="{{rfc .At}}">{{rfc .At}}</time></span>{{end}}</div>
+      <div class="name">{{.Text}}</div>
+    </div>
+    {{else}}
+    <p class="muted">No activity recorded.</p>
+    {{end}}
+  </section>
+  {{end}}
+</main>
+{{template "script"}}
+</body>
+</html>

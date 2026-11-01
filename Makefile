@@ -7,6 +7,7 @@
 #   make status               what is deployed, unit states, last health
 #   make verify               shellcheck + systemd-analyze verify, no changes
 #   make rcctl                build dist/rcctl (on a machine with docker) and record its sha256
+#   make test-docker          rc-inspect and alert tests in a Debian 13 container (needs docker and network)
 #
 # Rules enforced here (design: Change control and rollback):
 #   - working tree must be clean
@@ -25,8 +26,9 @@ PROFILES    ?= $(shell ls /etc/claude-rc/*.env 2>/dev/null | xargs -rn1 basename
 DEPLOYED    := /etc/claude-rc/DEPLOYED_TAG
 PREVIOUS    := /etc/claude-rc/PREVIOUS_TAG
 GO_IMAGE    := golang:1.27.3-bookworm
+TEST_IMAGE  := debian:trixie-slim
 
-.PHONY: deploy rollback status verify rcctl _preflight _install _restart bootstrap
+.PHONY: deploy rollback status verify rcctl test-docker _preflight _install _restart bootstrap
 
 deploy:
 	@if [ -n "$$(git status --porcelain)" ]; then echo "refusing: working tree is dirty"; exit 1; fi
@@ -113,3 +115,6 @@ rcctl:
 
 bootstrap:
 	bash bootstrap/bootstrap.sh
+
+test-docker:
+	for t in tests/docker/*.sh; do echo "== $$t"; docker run --rm -v "$$PWD":/r:ro $(TEST_IMAGE) bash /r/$$t || exit 1; done

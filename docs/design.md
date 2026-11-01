@@ -173,19 +173,21 @@ A single Go binary (`rcctl/`) served only on the tailnet via `tsnet`, as its own
 
 It runs as an unprivileged `rcctl` user. It reads the journal through the `systemd-journal` group, and `DEPLOYED_TAG` and `CLAUDE_VERSION` by name (`/etc/claude-rc` is traverse-only; the env files stay 0600). Restart, update and `rc-inspect` go through `sudo -n` with exact commands from `systemd/sudoers.d/claude-rc`; nothing else can be run that way. tsnet's log upload to Tailscale is turned off, and the first start prints a login URL to `journalctl -u rcctl` instead of storing an auth key. The tailnet needs HTTPS certificates turned on; note that the certificate puts the `claude-gw-ctl` hostname in public Certificate Transparency logs.
 
-| Panel | Data source | Actions |
+One scrolling page, in this order (design: `docs/superpowers/specs/2026-11-01-rcctl-page-redesign-design.md`):
+
+| Section | Data source | Actions |
 | --- | --- | --- |
-| Servers | `systemctl show claude-rc@<profile>`: state, since, restarts, memory | restart a profile |
-| Logs | `journalctl -u claude-rc@<profile>` | view |
-| Sessions | `rc-inspect <profile> sessions`: the 20 newest transcripts, with project and first prompt | view |
+| Health | `systemctl show claude-rc@<profile>` and the newest `rc-health` verdict per profile in its journal: one colour for the gateway (green all good, amber restarting or missed checks or a fatal pattern, red down), a headline, Claude Code version, deployed tag, last check | restart a profile, view its server log |
+| Sessions | `rc-inspect <profile> sessions`: JSON lines for every session of the last 36 h, split in the browser into Now (a Claude process in its directory, or written in the last 5 min) and Earlier today in the viewer's timezone | open a session's details page: start and last activity, worktree, branch, uncommitted changes, the last 50 prompts, replies and tool calls |
+| Alerts | the current problems from the Health signals, then `rc-alert`'s journal records (`-t rc-alert`) for 24 h, repeats folded into one row | silence for 1 h or 4 h, or turn back on |
 | Worktrees | `rc-inspect <profile> worktrees`: branch, merged into `main`, clean, in use | prune the finished ones |
-| Health | `journalctl -u claude-rc-health`, deployed tag, Claude Code version | |
-| Alerts | `/var/lib/rcctl/silence-until` | silence for 1 h or 4 h, or turn back on |
 | Update | `journalctl -u claude-rc-update` | run `rc-update` (starts `claude-rc-update.service`) |
+
+Times go to the browser in UTC and are shown in the viewer's timezone. The ↗ icon next to a session opens the Claude app's session list: the app's `session_` links share no ID with transcripts or worktrees, and the server log only places them near each other, so a per-session link would be a guess.
 
 `bin/rc-inspect` reads a profile's transcripts and worktrees. `rcctl` runs it through `sudo` with an exact command per profile and action, and it re-runs itself as the profile user (profile directories are 0700, and root must not follow paths a profile controls), passing on only the two paths from the env file, not the ntfy token. Prune removes a worktree only when its branch is merged into `main`, it has no changed, untracked or ignored files (removal would delete ignored ones), none of the profile's processes has its working directory inside it, and its transcripts have not changed in 24 h. The last two matter because a new session's untouched branch already counts as merged. `git worktree remove` refuses dirty work as a second check. `rc-health` moves its state on only once an alert is sent, so a silenced or failed alert (including a recovery) is retried on the next check and an outage that outlasts the silence alerts when it ends. A degraded pattern seen during a silence is cleared by the restart that follows, so it alerts later only if it comes back, as a real login failure does.
 
-Silencing writes an end time to `rcctl`'s own state directory, and `rc-alert` skips the high and low health alerts until then. The urgent "not restarting" alert always sends, and Claude's own permission-prompt notifications are not affected.
+Silencing writes an end time to `rcctl`'s own state directory, and `rc-alert` skips the high and low health alerts until then. The urgent "not restarting" alert always sends, and Claude's own permission-prompt notifications are not affected. `rc-alert` records every attempt (sent, silenced or failed) in the journal for the page's history. The urgent alert comes from systemd rather than `rc-health`, so when it is sent `rc-alert` marks `rc-health`'s state as alerted, and the next healthy check sends "recovered".
 
 The page is deliberately thin: Remote Control already provides the live session UI, so `rcctl` only covers what the Claude app cannot show (process state, logs) and what it cannot do (restart the server, update Claude Code).
 

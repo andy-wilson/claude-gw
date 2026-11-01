@@ -2,22 +2,60 @@
 # Read a profile's sessions and worktrees for rcctl, and prune finished worktrees. Run as root
 # via sudo (exact commands in systemd/sudoers.d/claude-rc); it re-runs itself as the profile,
 # because profile directories are 0700 and root must not follow paths the profile controls.
-#   rc-inspect <profile> sessions    newest transcripts: time, session, project, first prompt
+#   rc-inspect <profile> sessions    JSON lines: each session of the last 36 h, with recent activity
 #   rc-inspect <profile> worktrees   each worktree: merged into main, clean, in use, branch, path
 #   rc-inspect <profile> prune       remove worktrees that are merged, clean and not in use
 set -euo pipefail
 
+# Working directories of the profile's Claude session processes (not the Remote Control server).
+session_cwds() {
+  local d cmd
+  for d in /proc/[0-9]*; do
+    cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null)" || continue
+    case "$cmd" in *remote-control*) continue ;; *claude*) readlink "$d/cwd" 2>/dev/null || true ;; esac
+  done
+}
+
+# Recent activity and where the session ran, from the transcript's tail (bounded, newest first).
+# Lines are parsed one by one, so a partial last line is skipped.
+# shellcheck disable=SC2016  # jq program
+TAIL_JQ='[inputs | fromjson? | select(type == "object")] as $r
+| { cwd: ([$r[] | .cwd // empty] | last // ""),
+    branch: ([$r[] | .gitBranch // empty] | last // ""),
+    activity: ([$r[] | select(.type == "user" or .type == "assistant") | .type as $k | (.timestamp // "") as $t
+      | (.message.content | if type == "string" then [{type: "text", text: .}] elif type == "array" then . else [] end)[]
+      | if .type == "text" then {ts: $t, kind: $k, text: .text}
+        elif .type == "tool_use" then {ts: $t, kind: "tool", text: (.name + " " + ((.input.command // .input.file_path // .input.pattern // .input.description // .input.url // (.input | tostring)) | tostring))}
+        else empty end
+      | .text |= (gsub("\\s+"; " ") | .[0:300])] | .[-50:] | reverse) }'
+# shellcheck disable=SC2016
+HEAD_JQ='[limit(200; inputs | fromjson? | select(type == "object"))] as $r
+| { started: ([$r[] | .timestamp // empty] | first // ""),
+    prompt: ([$r[] | select(.type == "user" and (.message.content | type) == "string") | .message.content] | first // "" | gsub("\\s+"; " ") | .[0:120]) }'
+
+# One JSON object per session whose transcript changed in the last 36 h (the page keeps today's
+# in the viewer's timezone), newest first, at most 30.
 sessions() {  # <config dir>
-  cd "$1/projects" 2>/dev/null || { echo "no sessions yet"; return; }
-  printf '%-16s  %-36s  %s\n' UPDATED SESSION 'PROJECT / FIRST PROMPT'
+  cd "$1/projects" 2>/dev/null || return 0
+  local cwds f id last head tail live dirty cwd
+  cwds="$(session_cwds)"
   # Paths keep their ./ prefix: project directories start with "-", which commands read as options.
-  find . -mindepth 2 -maxdepth 2 -name '*.jsonl' -printf '%T@ %p\n' | sort -rn | awk 'NR <= 20' |
+  find . -mindepth 2 -maxdepth 2 -name '*.jsonl' -mmin -2160 -printf '%T@ %p\n' | sort -rn | awk 'NR <= 30' |
   while read -r _ f; do
-    # A transcript still being written can end in a partial line: show no prompt rather than stop.
-    prompt="$(jq -rn 'first(inputs | select(.type == "user" and (.message.content | type) == "string") | .message.content) // ""' "$f" 2>/dev/null | tr -s '\t\r\n' '   ' | cut -c1-100)" || prompt=""
-    id="${f##*/}"; project="${f#./}"
-    printf '%-16s  %-36s  %s\n' "$(date -r "$f" '+%F %H:%M')" "${id%.jsonl}" "${project%%/*}"
-    printf '%-16s  %-36s  %s\n' '' '' "${prompt:-(none)}"
+    id="${f##*/}"; id="${id%.jsonl}"
+    last="$(date -u -r "$f" +%FT%TZ)"
+    head="$(head -n 200 "$f" | jq -Rnc "$HEAD_JQ")" || head='{}'
+    tail="$(tail -n 400 "$f" | jq -Rnc "$TAIL_JQ")" || tail='{}'
+    cwd="$(printf '%s' "$tail" | jq -r '.cwd // ""')"
+    # Live: a Claude process works in its directory, or the transcript changed in the last 5 min.
+    live=false
+    if [ -n "$cwd" ] && printf '%s\n' "$cwds" | awk -v p="$cwd" '$0 == p || index($0, p "/") == 1 {f=1} END {exit !f}'; then live=true; fi
+    [ -n "$(find "$f" -mmin -5)" ] && live=true
+    dirty=false
+    [ -n "$cwd" ] && [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null)" ] && dirty=true
+    jq -nc --arg id "$id" --arg last "$last" --argjson head "$head" --argjson tail "$tail" \
+      --argjson live "$live" --argjson dirty "$dirty" \
+      '{id: $id, last: $last, live: $live, dirty: $dirty} + $head + $tail'
   done
 }
 
