@@ -73,6 +73,12 @@ type journalEntry struct {
 	Message string
 }
 
+// rootOnly matches a syslog identifier from root only. Any local user, a Claude session included,
+// can log under any identifier; _UID is set by journald and cannot be forged by the sender.
+func rootOnly(tag string, more ...string) []string {
+	return append([]string{"-t", tag, "_UID=0"}, more...)
+}
+
 func (a *app) journalJSON(ctx context.Context, args ...string) []journalEntry {
 	out, _ := a.run(ctx, "journalctl", append(args, "-o", "json", "--no-pager")...)
 	var es []journalEntry
@@ -109,7 +115,7 @@ var verdictRE = regexp.MustCompile(`^([a-z0-9-]+): (healthy|miss (\d+)|degraded 
 func (a *app) verdicts(ctx context.Context) map[string]verdict {
 	vs := map[string]verdict{}
 	// By identifier, not unit: a check run by hand logs its verdict too (rc-health's say).
-	for _, e := range a.journalJSON(ctx, "-t", "rc-health", "-n", "500") {
+	for _, e := range a.journalJSON(ctx, rootOnly("rc-health", "-n", "500")...) {
 		m := verdictRE.FindStringSubmatch(e.Message)
 		if m == nil {
 			continue
@@ -215,7 +221,7 @@ var alertRE = regexp.MustCompile(`^profile=(\S+) kind=(\S+) priority=(\S+) resul
 // or failed alert every check, so consecutive identical attempts fold into one row.
 func (a *app) alertHistory(ctx context.Context) []alertRow {
 	var rows []alertRow
-	for _, e := range a.journalJSON(ctx, "-t", "rc-alert", "--since", "-24h") {
+	for _, e := range a.journalJSON(ctx, rootOnly("rc-alert", "--since", "-24h")...) {
 		m := alertRE.FindStringSubmatch(e.Message)
 		if m == nil {
 			continue
