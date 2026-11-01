@@ -30,6 +30,9 @@ KillMode=control-group
 TimeoutStopSec=20
 Restart=always
 RestartSec=15
+# Restart without passing through "failed": since systemd 254 each automatic restart would
+# otherwise fire OnFailure, so the urgent "not restarting" alert went out on every crash.
+RestartMode=direct
 # Belt and braces: don't let a session see the other profile's home.
 ProtectHome=tmpfs
 BindPaths=/home/%i

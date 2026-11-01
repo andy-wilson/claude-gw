@@ -9,6 +9,8 @@
 # State in /var/lib/claude-rc/health-<profile>.json so alerts don't repeat every 2 min.
 # That dir is root-only; the log dir is profile-writable, so logs are only touched as the profile.
 set -uo pipefail
+# rc-alert and ntfy-send live here; `pct exec` and other bare shells leave it off PATH.
+export PATH="/usr/local/bin:$PATH"
 
 STATE_DIR=/var/lib/claude-rc
 LOG_DIR=/var/log/claude-rc
