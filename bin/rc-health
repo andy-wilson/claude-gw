@@ -40,8 +40,10 @@ for p in "${profiles[@]}"; do
 
   if [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ]; then
     if [ "$alerted" = true ] || [ "$misses" -gt 0 ] || [ -n "$degraded" ]; then
-      [ "$alerted" = true ] && PROFILE=$p rc-alert recovered || true
-      echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+      # State moves on only once an alert is sent: silenced (exit 3) or failed, it retries next check.
+      if [ "$alerted" != true ] || PROFILE=$p rc-alert recovered; then
+        echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+      fi
     fi
     echo "$p: healthy"
     continue
@@ -51,9 +53,9 @@ for p in "${profiles[@]}"; do
   if [ -n "$fatal" ]; then
     echo "$p: degraded ($fatal)"
     if [ "$degraded" != "$fatal" ]; then
-      # rc-alert exits 3 when silenced: leave the state as is so it alerts after the silence.
-      s=0; PROFILE=$p rc-alert degraded "$fatal" || s=$?
-      if [ $s != 3 ]; then
+      # Not sent (silenced or failed): the restart below clears the log, so only a pattern that
+      # comes back alerts later. A real login failure does.
+      if PROFILE=$p rc-alert degraded "$fatal"; then
         jq --arg f "$fatal" '.degraded=$f | .alerted=true' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
       fi
     fi
@@ -67,8 +69,7 @@ for p in "${profiles[@]}"; do
   echo "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
   systemctl restart "claude-rc@$p" || true
   if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
-    s=0; PROFILE=$p rc-alert down "$misses" || s=$?
-    [ $s = 3 ] || alerted=true
+    PROFILE=$p rc-alert down "$misses" && alerted=true
   fi
   jq --argjson m "$misses" --argjson a "$alerted" '.misses=$m | .alerted=$a' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
 done

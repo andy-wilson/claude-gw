@@ -9,7 +9,7 @@ Architecture diagrams, component design, security model, change control, definit
 ## Requirements and caveats
 
 - A claude.ai subscription with Remote Control (Pro/Max, or Team/Enterprise with it enabled by an Owner). API keys and long-lived tokens are refused by Remote Control.
-- Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 12 with systemd. Scripts and `make` targets run as root inside the container.
+- Proxmox VE for `proxmox/*.sh`; everything else needs only Debian 13 with systemd. Scripts and `make` targets run as root inside the container.
 - A Tailscale account, and an ntfy.sh topic per profile with an access token that can only publish to it (sessions of that profile can see the token).
 - Built against Claude Code 2.1.312. It relies on `claude remote-control` flags and on the wording of its error messages (`FATAL_RE` in `bin/rc-health`), neither of which is a stable interface. Updates come from npm's `latest` release through `rc-update`, which reverts if the servers come back unhealthy; rerun `tests/acceptance.md` after updates you care about.
 - Anyone who controls your claude.ai account, Anthropic's relay or the Claude Code npm package can run commands on the gateway and reach whatever it can reach on your network. Restrict its egress and credentials; see "If Anthropic, the account or Claude Code is compromised" in `docs/design.md`.
@@ -35,7 +35,7 @@ Makefile     deploy TAG=vX.Y | rollback | status | verify | rcctl
 On the Proxmox host, with a dedicated directory to share with the gateway (it becomes `/mnt/lab`; nothing else on the host is mounted):
 
 ```bash
-CTID=<ctid> STORAGE=local-lvm TEMPLATE=debian-12-standard_12.12-1_amd64.tar.zst LAB_SHARE=/<pool>/lab-share ./proxmox/create-lxc.sh
+CTID=<ctid> STORAGE=local-lvm LAB_SHARE=/<pool>/lab-share ./proxmox/create-lxc.sh
 LAN_CIDR=192.168.1.0/24 DNS=<resolver> ./proxmox/firewall.sh enable <ctid>   # egress firewall; DNS is the resolver the container gets from DHCP
 ```
 
