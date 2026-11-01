@@ -32,7 +32,7 @@
   button:disabled { opacity: .5; cursor: wait; }
   pre { margin: 0; overflow-x: auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
   .kind { font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; }
-  #msg { min-height: 1.4em; }
+  .status { font-size: 13px; }
 </style>{{end -}}
 {{define "script"}}<script>
   // Times arrive in UTC; show them in this device's timezone.
@@ -49,15 +49,18 @@
     list.querySelectorAll("[data-last]").forEach(el => { if (new Date(el.dataset.last) < midnight) el.remove(); });
     if (!list.querySelector("[data-last]")) list.insertAdjacentHTML("beforeend", '<p class="muted">None yet today.</p>');
   });
+  // Feedback goes next to the button pressed: on a phone the top of the page is off-screen.
   document.querySelectorAll("button[data-post]").forEach(b => b.addEventListener("click", async () => {
     if (!confirm(b.dataset.confirm)) return;
-    const msg = document.getElementById("msg");
+    let st = b.nextElementSibling;
+    if (!st || !st.classList.contains("status")) { st = document.createElement("span"); st.className = "status muted"; b.after(st); }
     b.disabled = true;
+    st.textContent = "Working…";
     try {
       const r = await fetch(b.dataset.post, { method: "POST", headers: { "X-Rcctl": "1" } });
-      msg.textContent = (await r.text()).trim();
-      if (r.ok) setTimeout(() => location.reload(), 3000);
-    } catch (e) { msg.textContent = String(e); }
+      st.textContent = (await r.text()).trim() || (r.ok ? "done" : "failed");
+      if (r.ok) { st.textContent += " · reloading"; setTimeout(() => location.reload(), 3000); }
+    } catch (e) { st.textContent = "No reply (" + e.message + "). Check the logs before pressing again."; }
     b.disabled = false;
   }));
 </script>{{end -}}
@@ -85,7 +88,6 @@
     <h1>claude-gw</h1>
     <span class="muted">{{.Login}} · <time datetime="{{rfc .Rendered}}">{{rfc .Rendered}}</time></span>
   </header>
-  <p id="msg" class="muted"></p>
 
   <section class="health {{.Level}}">
     <p class="headline"><span class="dot"></span>{{.Headline}}</p>

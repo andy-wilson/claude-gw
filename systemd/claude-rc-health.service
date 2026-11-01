@@ -4,4 +4,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+# Never let a stuck check hold the timer: the next one starts 2 min after this ends.
+TimeoutStartSec=3min
 ExecStart=/usr/local/bin/rc-health

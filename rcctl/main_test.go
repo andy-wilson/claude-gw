@@ -45,7 +45,7 @@ func testApp(t *testing.T) (*app, *[]string, fake) {
 	}
 	out := fake{
 		"systemctl show":                            showActive,
-		"journalctl -u claude-rc-health":            journal(4, "cc-home: healthy"),
+		"journalctl -t rc-health":            journal(4, "cc-home: healthy"),
 		"sudo -n " + inspect + " cc-home sessions":  sessionsJS,
 		"sudo -n " + inspect + " cc-home worktrees": "MERGED  CLEAN  IN USE  BRANCH  PATH\n<b>wt</b>\n",
 		"sudo -n " + inspect + " cc-home prune":     "pruned 0 worktree(s)\n",
@@ -177,7 +177,7 @@ func TestHealthLevels(t *testing.T) {
 		{"failed", "ActiveState=failed\nSubState=failed\nInactiveEnterTimestamp=@1793447000\n", journal(2, "cc-home: healthy"), "bad", "cc-home down, not restarting"},
 	} {
 		a, _, out := testApp(t)
-		out["systemctl show"], out["journalctl -u claude-rc-health"] = c.show, c.health
+		out["systemctl show"], out["journalctl -t rc-health"] = c.show, c.health
 		b := body(a, "/")
 		if !strings.Contains(b, `class="health `+c.level+`"`) || !strings.Contains(b, c.want) {
 			t.Errorf("%s: want level %s and %q", c.name, c.level, c.want)
@@ -194,7 +194,7 @@ func TestMissStreakSince(t *testing.T) {
 		t.Errorf("healthy verdict: %+v", v)
 	}
 	a, _, out := testApp(t)
-	out["journalctl -u claude-rc-health"] = journal(9, "cc-home: miss 1 (x)", 7, "cc-home: healthy", 5, "cc-home: miss 1 (x)", 3, "cc-home: miss 2 (x)")
+	out["journalctl -t rc-health"] = journal(9, "cc-home: miss 1 (x)", 7, "cc-home: healthy", 5, "cc-home: miss 1 (x)", 3, "cc-home: miss 2 (x)")
 	if v := a.verdicts(context.Background())["cc-home"]; v.Misses != 2 || !v.Streak.Equal(testNow.Add(-5*time.Minute)) {
 		t.Errorf("streak should start at the miss after the last healthy check: %+v", v)
 	}
