@@ -13,7 +13,14 @@ useradd -m -s /bin/bash cc-home
 mkdir -p /var/lib/claude-rc /var/log/claude-rc /etc/systemd/system/multi-user.target.wants
 touch /etc/systemd/system/multi-user.target.wants/claude-rc@cc-home.service
 # systemd is not running here: report the unit active with a cgroup; restarts do nothing.
-printf '#!/bin/sh\ncase "$1" in is-active) echo active;; show) echo /x;; *) :;; esac\n' > /usr/local/bin/systemctl
+cat > /usr/local/bin/systemctl <<'X'
+#!/bin/sh
+case "$1" in
+  is-active) echo active ;;
+  show) case "$*" in *ActiveEnterTimestamp*) echo "@${UP:-1}" ;; *) echo /x ;; esac ;;
+  restart) echo "$*" >> /tmp/restarts ;;
+esac
+X
 printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/rc-alert
 chmod +x /usr/local/bin/systemctl /usr/local/bin/rc-alert
 
@@ -31,5 +38,14 @@ check "frozen tmux server counts as a miss" '[[ $v == "cc-home: miss 1 "* ]]'
 check "the check does not hang (under 30 s)" '[ $took -lt 30 ]'
 kill -CONT "$tpid"; sleep 1
 check "healthy again after CONT" '[ "$(verdict)" = "cc-home: healthy" ]'
+
+# --ready: read-only readiness for make deploy.
+rm -f /var/lib/claude-rc/health-cc-home.json /tmp/restarts
+check "ready when healthy and up for a while" 'rc-health --ready'
+check "not ready within 10 s of starting" '! UP=$(( $(date +%s) - 3 )) rc-health --ready'
+kill -STOP "$tpid"
+check "not ready when frozen" '! rc-health --ready'
+kill -CONT "$tpid"
+check "--ready restarts nothing and writes no state" '[ ! -e /tmp/restarts ] && [ ! -e /var/lib/claude-rc/health-cc-home.json ]'
 
 echo "$fails failure(s)"; exit $((fails > 0))

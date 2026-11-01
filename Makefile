@@ -88,11 +88,16 @@ _restart:
 	done
 	# Opt-in: only restarted if already enabled and running (systemctl enable --now rcctl).
 	systemctl try-restart rcctl 2>/dev/null || true
-	# Announce the deploy (or rollback) once the servers have had a minute, so a planned restart
-	# reads as one on the phone. Here rather than in deploy: this recipe comes from the new tag.
-	echo "waiting 60 s, then a health check and the deploy notice"; sleep 60
-	now=$$(cat $(DEPLOYED)); was=$$(cat $(PREVIOUS) 2>/dev/null || echo none)
-	if $(PREFIX)/bin/rc-health; then kind=deployed; else kind=deploy-unhealthy; echo "WARNING: not healthy after the deploy; consider make rollback"; fi
+	# Announce the deploy (or rollback) as soon as every server is healthy and has stayed up 10 s,
+	# or after 60 s if not, so a planned restart reads as one on the phone. Here rather than in
+	# deploy: this recipe comes from the new tag.
+	echo "waiting for the servers to be ready (up to 60 s)"
+	now=$$(cat $(DEPLOYED)); was=$$(cat $(PREVIOUS) 2>/dev/null || echo none); kind=deploy-unhealthy
+	for i in $$(seq 30); do
+	  if $(PREFIX)/bin/rc-health --ready; then kind=deployed; echo "ready after about $$((i * 2)) s"; break; fi
+	  sleep 2
+	done
+	[ $$kind = deployed ] || echo "WARNING: not healthy 60 s after the deploy; consider make rollback"
 	for p in $(PROFILES); do PROFILE=$$p $(PREFIX)/bin/rc-alert $$kind "$$now (was $$was)" || true; done
 	sleep 3; systemctl --no-pager --plain status 'claude-rc@*' | head -n 40 || true
 
