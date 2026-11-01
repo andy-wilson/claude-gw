@@ -4,7 +4,9 @@
 # Per profile:
 #   healthy   = unit active AND tmux session present AND a `claude` process in the unit
 #               AND no fatal pattern in the last 60 log lines
-#   miss      = any of the first three false   -> restart the unit; alert on 2 consecutive misses
+#   miss      = any of the first three false   -> reset-failed and restart the unit; alert on 2
+#               consecutive misses. Every check retries, so a server systemd gave up on recovers
+#               once the cause (an outage, say) clears.
 #   degraded  = fatal pattern in the log        -> alert once per distinct pattern, restart
 # State in /var/lib/claude-rc/health-<profile>.json so alerts don't repeat every 2 min.
 #
@@ -88,12 +90,16 @@ for p in "${profiles[@]}"; do
     fi
     # A restart clears a transient; a real auth problem will show the same pattern again (no re-alert).
     sudo -u "$p" truncate -s 0 "$LOG_DIR/$p.log" || true
+    systemctl reset-failed "claude-rc@$p" 2>/dev/null || true
     systemctl restart "claude-rc@$p" || true
     continue
   fi
 
   misses=$((misses + 1))
   say "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
+  # reset-failed first: once systemd has hit the start limit (an outage longer than the client's
+  # retries), a plain restart is refused and the server would stay down after the cause clears.
+  systemctl reset-failed "claude-rc@$p" 2>/dev/null || true
   systemctl restart "claude-rc@$p" || true
   if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
     PROFILE=$p rc-alert down "$misses" && alerted=true

@@ -18,7 +18,7 @@ cat > /usr/local/bin/systemctl <<'X'
 case "$1" in
   is-active) echo active ;;
   show) case "$*" in *ActiveEnterTimestamp*) echo "@${UP:-1}" ;; *) echo /x ;; esac ;;
-  restart) echo "$*" >> /tmp/restarts ;;
+  restart|reset-failed) echo "$*" >> /tmp/restarts ;;
 esac
 X
 printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/rc-alert
@@ -37,6 +37,7 @@ start=$(date +%s); v="$(verdict)"; took=$(( $(date +%s) - start ))
 check "frozen tmux server counts as a miss" '[[ $v == "cc-home: miss 1 "* ]]'
 check "the check does not hang (under 30 s)" '[ $took -lt 30 ]'
 kill -CONT "$tpid"; sleep 1
+check "a miss resets the failed state before restarting" '[ "$(head -n2 /tmp/restarts | cut -d" " -f1 | paste -sd,)" = "reset-failed,restart" ]'
 check "healthy again after CONT" '[ "$(verdict)" = "cc-home: healthy" ]'
 
 # --ready: read-only readiness for make deploy.
