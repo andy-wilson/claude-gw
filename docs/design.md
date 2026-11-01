@@ -165,7 +165,7 @@ The firewall cannot see inside the Tailscale tunnel, so what the gateway can rea
 
 ### Managed Claude settings
 
-`make deploy` installs `profiles/settings.json` as `/etc/claude-code/managed-settings.json`. Managed settings are root-owned and take precedence over anything a profile or project sets, so a session cannot remove the hooks or deny rules, and `disableBypassPermissionsMode` blocks `bypassPermissions` outright. Each profile's own `settings.json` (plugins, MCP config, its approvals) is left alone. Isolation between profiles is enforced by the OS (separate users, `ProtectHome`, 0700 config and working directories, root-only env files), not by these rules.
+`make deploy` installs `profiles/settings.json` as `/etc/claude-code/managed-settings.json`. Managed settings are root-owned and take precedence over anything a profile or project sets, so a session cannot remove the hooks or deny rules, and `disableBypassPermissionsMode` blocks `bypassPermissions` outright. `acceptEdits` also approves common file commands such as `rm` inside the working directory without asking, so managed `ask` rules make deletes and history rewrites (`rm`, `git rm`, `git reset`, `git clean`, `git push --force`) prompt on the phone; that prompt is what AT13 exercises. Each profile's own `settings.json` (plugins, MCP config, its approvals) is left alone. Isolation between profiles is enforced by the OS (separate users, `ProtectHome`, 0700 config and working directories, root-only env files), not by these rules.
 
 ### Control page (phase 3)
 
