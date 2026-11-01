@@ -108,7 +108,8 @@ var verdictRE = regexp.MustCompile(`^([a-z0-9-]+): (healthy|miss (\d+)|degraded 
 
 func (a *app) verdicts(ctx context.Context) map[string]verdict {
 	vs := map[string]verdict{}
-	for _, e := range a.journalJSON(ctx, "-u", "claude-rc-health.service", "-n", "500") {
+	// By identifier, not unit: a check run by hand logs its verdict too (rc-health's say).
+	for _, e := range a.journalJSON(ctx, "-t", "rc-health", "-n", "500") {
 		m := verdictRE.FindStringSubmatch(e.Message)
 		if m == nil {
 			continue

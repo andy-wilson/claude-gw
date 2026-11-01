@@ -23,6 +23,10 @@ mapfile -t profiles < <(ls /etc/systemd/system/multi-user.target.wants/ 2>/dev/n
   | sed -nE 's/^claude-rc@(.+)\.service$/\1/p')
 [ ${#profiles[@]} -eq 0 ] && { echo "no enabled claude-rc@ instances"; exit 0; }
 
+# Verdicts reach the journal as rc-health: through stdout from the timer's unit, or through
+# logger when run by hand, so rcctl sees both.
+say() { echo "$1"; [ -n "${INVOCATION_ID:-}" ] || logger -t rc-health "$1" 2>/dev/null || true; }
+
 rc=0
 for p in "${profiles[@]}"; do
   state="$STATE_DIR/health-$p.json"
@@ -31,7 +35,9 @@ for p in "${profiles[@]}"; do
 
   active=$(systemctl is-active "claude-rc@$p" 2>/dev/null || true)
   has_tmux=no; has_proc=no
-  if sudo -u "$p" -H tmux -L "rc-$p" has-session -t rc 2>/dev/null; then has_tmux=yes; fi
+  # A hung server (frozen cgroup) blocks tmux's reply: a probe that times out is a miss, not a hang.
+  # Output to /dev/null so a client left waiting on the frozen server holds no pipe of ours.
+  if timeout -k 2 10 sudo -u "$p" -H tmux -L "rc-$p" has-session -t rc >/dev/null 2>&1; then has_tmux=yes; fi
   if systemctl show -p ControlGroup --value "claude-rc@$p" | grep -q . \
      && pgrep -u "$p" -f 'claude remote-control|claude-code' >/dev/null 2>&1; then has_proc=yes; fi
 
@@ -47,13 +53,13 @@ for p in "${profiles[@]}"; do
         echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
       fi
     fi
-    echo "$p: healthy"
+    say "$p: healthy"
     continue
   fi
 
   rc=1
   if [ -n "$fatal" ]; then
-    echo "$p: degraded ($fatal)"
+    say "$p: degraded ($fatal)"
     if [ "$degraded" != "$fatal" ]; then
       # Not sent (silenced or failed): the restart below clears the log, so only a pattern that
       # comes back alerts later. A real login failure does.
@@ -68,7 +74,7 @@ for p in "${profiles[@]}"; do
   fi
 
   misses=$((misses + 1))
-  echo "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
+  say "$p: miss $misses (active=$active tmux=$has_tmux proc=$has_proc)"
   systemctl restart "claude-rc@$p" || true
   if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
     PROFILE=$p rc-alert down "$misses" && alerted=true
