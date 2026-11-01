@@ -7,6 +7,10 @@
 #   miss      = any of the first three false   -> restart the unit; alert on 2 consecutive misses
 #   degraded  = fatal pattern in the log        -> alert once per distinct pattern, restart
 # State in /var/lib/claude-rc/health-<profile>.json so alerts don't repeat every 2 min.
+#
+#   rc-health --ready   read-only: exit 0 once every server is healthy and has been up 10 s.
+#                       No restarts, alerts or state (make deploy polls it; a miss here must not
+#                       restart a server that is still starting).
 # That dir is root-only; the log dir is profile-writable, so logs are only touched as the profile.
 set -uo pipefail
 # rc-alert and ntfy-send live here; `pct exec` and other bare shells leave it off PATH.
@@ -27,12 +31,9 @@ mapfile -t profiles < <(ls /etc/systemd/system/multi-user.target.wants/ 2>/dev/n
 # logger when run by hand, so rcctl sees both.
 say() { echo "$1"; [ -n "${INVOCATION_ID:-}" ] || logger -t rc-health "$1" 2>/dev/null || true; }
 
-rc=0
-for p in "${profiles[@]}"; do
-  state="$STATE_DIR/health-$p.json"
-  [ -f "$state" ] || echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
-  misses=$(jq -r .misses "$state"); alerted=$(jq -r .alerted "$state"); degraded=$(jq -r .degraded "$state")
-
+# Sets active, has_tmux, has_proc and fatal for profile $1.
+probe() {
+  local p="$1"
   active=$(systemctl is-active "claude-rc@$p" 2>/dev/null || true)
   has_tmux=no; has_proc=no
   # A hung server (frozen cgroup) blocks tmux's reply: a probe that times out is a miss, not a hang.
@@ -45,6 +46,24 @@ for p in "${profiles[@]}"; do
   if [ -f "$LOG_DIR/$p.log" ]; then
     fatal=$(tail -n 60 "$LOG_DIR/$p.log" | grep -oE "$FATAL_RE" | tail -n1 || true)
   fi
+}
+
+if [ "${1:-}" = --ready ]; then
+  for p in "${profiles[@]}"; do
+    probe "$p"
+    up=$(systemctl show -p ActiveEnterTimestamp --timestamp=unix --value "claude-rc@$p" 2>/dev/null | tr -d @)
+    [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ] \
+      && [ -n "$up" ] && [ $(( $(date +%s) - up )) -ge 10 ] || exit 1
+  done
+  exit 0
+fi
+
+rc=0
+for p in "${profiles[@]}"; do
+  state="$STATE_DIR/health-$p.json"
+  [ -f "$state" ] || echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+  misses=$(jq -r .misses "$state"); alerted=$(jq -r .alerted "$state"); degraded=$(jq -r .degraded "$state")
+  probe "$p"
 
   if [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ]; then
     if [ "$alerted" = true ] || [ "$misses" -gt 0 ] || [ -n "$degraded" ]; then
