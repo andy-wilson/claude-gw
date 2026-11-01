@@ -38,6 +38,17 @@ case "$kind" in
   *) echo "unknown kind $kind" >&2; exit 2 ;;
 esac
 
+# OnFailure also fires when a deliberate restart (rc-health, make deploy) has to kill a hung
+# server: the unit passes through "failed" and starts again. The urgent alert means systemd gave
+# up, so send it only if the unit is still failed a moment later (start limit hit, as in AT7).
+if [ "$kind" = unit-failed ]; then
+  sleep "${UNIT_FAILED_WAIT:-5}"
+  if ! systemctl is-failed --quiet "claude-rc@$PROFILE"; then
+    echo "rc-alert: claude-rc@$PROFILE failed on the way to a restart and is running again; no urgent alert"
+    exit 0
+  fi
+fi
+
 # Every attempt goes to the journal for rcctl's alert history (what= last: it may contain spaces).
 record() { logger -t rc-alert "profile=$PROFILE kind=$kind priority=$prio result=$1 what=$what" 2>/dev/null || true; }
 

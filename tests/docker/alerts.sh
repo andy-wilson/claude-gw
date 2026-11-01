@@ -12,7 +12,9 @@ mkdir -p /var/lib/rcctl /var/lib/claude-rc /var/log/claude-rc /etc/systemd/syste
 printf '#!/bin/sh\necho "$*" >> /tmp/sent; [ -z "$NTFY_FAIL" ]\n' > /usr/local/bin/ntfy-send
 printf '#!/bin/sh\nshift 2; echo "$*" >> /tmp/journal\n' > /usr/local/bin/logger
 chmod +x /usr/local/bin/ntfy-send /usr/local/bin/logger
-export PROFILE=cc-home
+export PROFILE=cc-home UNIT_FAILED_WAIT=0
+# systemctl is-failed answers from $FAILED (default: the unit is failed).
+printf '#!/bin/sh\ncase "$1" in is-failed) [ "${FAILED:-yes}" = yes ];; *) :;; esac\n' > /usr/local/bin/systemctl; chmod +x /usr/local/bin/systemctl
 last() { tail -n1 /tmp/journal; }
 
 echo $(( $(date +%s) + 600 )) > /var/lib/rcctl/silence-until
@@ -20,6 +22,8 @@ rc-alert down 2 >/dev/null; rc=$?
 check "silenced alert exits 3" '[ $rc = 3 ]'
 check "silenced alert not sent" '[ ! -s /tmp/sent ]'
 check "silenced alert recorded" '[ "$(last)" = "profile=cc-home kind=down priority=high result=silenced what=unhealthy, 2 missed checks" ]'
+FAILED=no rc-alert unit-failed >/dev/null; rc=$?
+check "no urgent alert when the unit is running again (forced restart)" '[ $rc = 0 ] && ! grep -q "^urgent" /tmp/sent 2>/dev/null'
 rc-alert unit-failed; rc=$?
 check "urgent alert sends through a silence" '[ $rc = 0 ] && grep -q "^urgent claude-gw: cc-home DOWN" /tmp/sent'
 check "urgent alert recorded as sent" '[ "$(last)" = "profile=cc-home kind=unit-failed priority=urgent result=sent what=DOWN, not restarting" ]'
