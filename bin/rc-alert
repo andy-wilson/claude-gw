@@ -13,32 +13,44 @@ kind="${1:?kind}"; arg="${2:-}"
 PROFILE="${PROFILE:?PROFILE unset}"
 HOST="$(hostname -s)"
 
-# rcctl's Silence button writes an end time here. It never holds back the urgent alert.
-# Exit 3 (silenced) like any failure tells rc-health it was not sent; it retries on the next check.
-until="$(cat /var/lib/rcctl/silence-until 2>/dev/null || true)"
-case "$kind" in down|degraded|recovered)
-  if [[ $until =~ ^[0-9]+$ ]] && [ "$until" -gt "$(date +%s)" ]; then
-    echo "rc-alert: $kind for $PROFILE silenced until $(date -d "@$until" -Is)"
-    exit 3
-  fi ;;
-esac
-
 case "$kind" in
   unit-failed)
     # No log lines in the body (design: nothing lab-specific leaves the house).
-    ntfy-send urgent "claude-gw: $PROFILE DOWN, not restarting" \
-      "claude-rc@$PROFILE on $HOST hit its restart limit. Needs a hand: ssh in, check journalctl -u claude-rc@$PROFILE, then systemctl reset-failed claude-rc@$PROFILE && systemctl start claude-rc@$PROFILE" "rotating_light"
-    ;;
+    prio=urgent; tags=rotating_light; what="DOWN, not restarting"; title="claude-gw: $PROFILE DOWN, not restarting"
+    body="claude-rc@$PROFILE on $HOST hit its restart limit. Needs a hand: ssh in, check journalctl -u claude-rc@$PROFILE, then systemctl reset-failed claude-rc@$PROFILE && systemctl start claude-rc@$PROFILE" ;;
   down)
-    ntfy-send high "claude-gw: $PROFILE unhealthy" \
-      "Health check missed $arg times on $HOST; restart requested. If this repeats, see journalctl -u claude-rc@$PROFILE." "warning"
-    ;;
+    prio=high; tags=warning; what="unhealthy, $arg missed checks"; title="claude-gw: $PROFILE unhealthy"
+    body="Health check missed $arg times on $HOST; restart requested. If this repeats, see journalctl -u claude-rc@$PROFILE." ;;
   degraded)
-    ntfy-send high "claude-gw: $PROFILE needs attention" \
-      "$arg on $HOST. The process is up but Remote Control may be unusable." "warning"
-    ;;
+    prio=high; tags=warning; what="needs attention: $arg"; title="claude-gw: $PROFILE needs attention"
+    body="$arg on $HOST. The process is up but Remote Control may be unusable." ;;
   recovered)
-    ntfy-send low "claude-gw: $PROFILE recovered" "claude-rc@$PROFILE on $HOST is healthy again." "white_check_mark"
-    ;;
+    prio=low; tags=white_check_mark; what="recovered"; title="claude-gw: $PROFILE recovered"
+    body="claude-rc@$PROFILE on $HOST is healthy again." ;;
   *) echo "unknown kind $kind" >&2; exit 2 ;;
 esac
+
+# Every attempt goes to the journal for rcctl's alert history (what= last: it may contain spaces).
+record() { logger -t rc-alert "profile=$PROFILE kind=$kind priority=$prio result=$1 what=$what" 2>/dev/null || true; }
+
+# rcctl's Silence button writes an end time here. It never holds back the urgent alert.
+# Exit 3 (silenced) like any failure tells rc-health it was not sent; it retries on the next check.
+until="$(cat /var/lib/rcctl/silence-until 2>/dev/null || true)"
+if [ "$prio" != urgent ] && [[ $until =~ ^[0-9]+$ ]] && [ "$until" -gt "$(date +%s)" ]; then
+  echo "rc-alert: $kind for $PROFILE silenced until $(date -d "@$until" -Is)"
+  record silenced
+  exit 3
+fi
+
+if ntfy-send "$prio" "$title" "$body" "$tags"; then
+  record sent
+  # The urgent alert comes from systemd, not rc-health: mark rc-health's state as alerted so its
+  # next healthy check sends "recovered", as it does after its own alerts.
+  if [ "$kind" = unit-failed ]; then
+    st="/var/lib/claude-rc/health-$PROFILE.json"
+    { jq '.alerted = true' "$st" 2>/dev/null || echo '{"misses":0,"alerted":true,"degraded":""}'; } > "$st.tmp" && mv "$st.tmp" "$st"
+  fi
+else
+  record failed
+  exit 1
+fi

@@ -1,7 +1,7 @@
 // rcctl: tailnet-only control page for the claude-gw Remote Control servers (phase 3).
 //
-// Panels: servers, health, logs, sessions, worktrees. Actions: restart a profile's server, run
-// rc-update, prune finished worktrees, silence alerts.
+// One page, in order: health, sessions (each with a details page), alerts, worktrees, update.
+// Actions: restart a profile's server, run rc-update, prune finished worktrees, silence alerts.
 // Tailscale identity is the authentication: a caller must be an untagged node whose login is
 // in RCCTL_ALLOW. Runs as the unprivileged rcctl user; actions go through sudo rules limited
 // to exact commands (systemd/sudoers.d/claude-rc), and each one is logged with the caller.
@@ -33,6 +33,10 @@ const (
 	inspect  = "/usr/local/bin/rc-inspect"
 )
 
+// appURL is where the ↗ icon goes: the Claude app's session list. The Remote Control log's
+// session_ links share no ID with transcripts or worktrees, so a per-session link would be a guess.
+const appURL = "https://claude.ai/code"
+
 // silenceFile is read by rc-alert (as root): alerts other than the urgent one wait until then.
 const silenceFile = "silence-until"
 
@@ -41,9 +45,18 @@ var silenceMinutes = map[string]bool{"0": true, "60": true, "240": true}
 
 var unitRE = regexp.MustCompile(`^claude-rc@([a-z0-9-]+)\.service$`)
 
-//go:embed page.html detail.html
+//go:embed page.html session.html
 var pageFS embed.FS
-var page = template.Must(template.ParseFS(pageFS, "page.html", "detail.html"))
+var page = template.Must(template.New("").Funcs(template.FuncMap{
+	"rfc": func(t time.Time) string { return t.UTC().Format(time.RFC3339) },
+	// sessionRow gives the session-row template a session and the app link together.
+	"sessionRow": func(s session, appURL string) any {
+		return struct {
+			session
+			AppURL string
+		}{s, appURL}
+	},
+}).ParseFS(pageFS, "page.html", "session.html"))
 
 type app struct {
 	allow map[string]bool
@@ -54,10 +67,6 @@ type app struct {
 	etc   string
 	state string // StateDirectory: holds the silence file
 	now   func() time.Time
-}
-
-type server struct {
-	Profile, Active, Since, Restarts, Memory string
 }
 
 func run(ctx context.Context, name string, args ...string) (string, error) {
@@ -104,18 +113,6 @@ func mib(bytes string) string {
 		return "-"
 	}
 	return fmt.Sprintf("%d MiB", n>>20)
-}
-
-func (a *app) server(ctx context.Context, p string) server {
-	out, _ := a.run(ctx, "systemctl", "show", "-p", "ActiveState,SubState,ActiveEnterTimestamp,NRestarts,MemoryCurrent", "claude-rc@"+p+".service")
-	kv := parseShow(out)
-	return server{
-		Profile:  p,
-		Active:   kv["ActiveState"] + " (" + kv["SubState"] + ")",
-		Since:    kv["ActiveEnterTimestamp"],
-		Restarts: kv["NRestarts"],
-		Memory:   mib(kv["MemoryCurrent"]),
-	}
 }
 
 func (a *app) file(name string) string {
@@ -168,27 +165,55 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /logs/{profile}", a.auth(a.logs))
 	mux.HandleFunc("POST /restart/{profile}", a.auth(a.restart))
 	mux.HandleFunc("POST /update", a.auth(a.update))
-	mux.HandleFunc("GET /sessions/{profile}", a.auth(a.detail("sessions", "Sessions")))
-	mux.HandleFunc("GET /worktrees/{profile}", a.auth(a.detail("worktrees", "Worktrees")))
+	mux.HandleFunc("GET /session/{profile}/{id}", a.auth(a.sessionPage))
 	mux.HandleFunc("POST /prune/{profile}", a.auth(a.prune))
 	mux.HandleFunc("POST /silence/{minutes}", a.auth(a.silence))
 	return mux
 }
 
 func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
-	var servers []server
+	ctx := r.Context()
+	vs := a.verdicts(ctx)
+	var servers, problems []server
+	var now, earlier []session
+	worst, headline, lastCheck := levelOK, "All good", time.Time{}
 	for _, p := range a.profiles() {
-		servers = append(servers, a.server(r.Context(), p))
+		s := a.status(ctx, p, vs[p])
+		s.Worktrees, _ = a.run(ctx, "sudo", "-n", inspect, p, "worktrees")
+		servers = append(servers, s)
+		if s.Level > levelOK {
+			problems = append(problems, s)
+		}
+		if s.Level > worst {
+			worst, headline = s.Level, p+" "+s.Problem
+		}
+		if vs[p].At.After(lastCheck) {
+			lastCheck = vs[p].At
+		}
+		for _, ss := range a.sessions(ctx, p) {
+			if ss.Live {
+				now = append(now, ss)
+			} else {
+				earlier = append(earlier, ss)
+			}
+		}
 	}
 	data := map[string]any{
-		"Login":    login,
-		"Servers":  servers,
-		"Tag":      a.file("DEPLOYED_TAG"),
-		"Claude":   a.file("CLAUDE_VERSION"),
-		"Health":   a.journal(r.Context(), "claude-rc-health.service", 12),
-		"Update":   a.journal(r.Context(), "claude-rc-update.service", 12),
-		"Silenced": a.silencedUntil(),
-		"Rendered": a.now().Format(time.RFC3339),
+		"Login":     login,
+		"Level":     levelNames[worst],
+		"Headline":  headline,
+		"LastCheck": lastCheck,
+		"Servers":   servers,
+		"Problems":  problems,
+		"Now":       now,
+		"Earlier":   earlier,
+		"Alerts":    a.alertHistory(ctx),
+		"AppURL":    appURL,
+		"Tag":       a.file("DEPLOYED_TAG"),
+		"Claude":    a.file("CLAUDE_VERSION"),
+		"Update":    a.journal(ctx, "claude-rc-update.service", 12),
+		"Silenced":  a.silencedUntil(),
+		"Rendered":  a.now(),
 	}
 	if err := page.ExecuteTemplate(w, "page.html", data); err != nil {
 		log.Printf("render: %v", err)
@@ -205,23 +230,23 @@ func (a *app) logs(w http.ResponseWriter, r *http.Request, _ string) {
 	fmt.Fprint(w, a.journal(r.Context(), "claude-rc@"+p+".service", 300))
 }
 
-// detail shows rc-inspect's view of one profile (run as that profile; its directories are 0700).
-func (a *app) detail(cmd, title string) func(http.ResponseWriter, *http.Request, string) {
-	return func(w http.ResponseWriter, r *http.Request, _ string) {
-		p := r.PathValue("profile")
-		if !a.isProfile(p) {
-			http.NotFound(w, r)
+// sessionPage shows one session's details and recent activity. rc-inspect returns every recent
+// session in one exact sudo command, so the ID is matched here rather than passed to sudo.
+func (a *app) sessionPage(w http.ResponseWriter, r *http.Request, _ string) {
+	p, id := r.PathValue("profile"), r.PathValue("id")
+	if !a.isProfile(p) {
+		http.NotFound(w, r)
+		return
+	}
+	for _, s := range a.sessions(r.Context(), p) {
+		if s.ID == id {
+			if err := page.ExecuteTemplate(w, "session.html", map[string]any{"S": s, "AppURL": appURL}); err != nil {
+				log.Printf("render: %v", err)
+			}
 			return
 		}
-		out, err := a.run(r.Context(), "sudo", "-n", inspect, p, cmd)
-		if err != nil {
-			out += "\n(" + err.Error() + ")"
-		}
-		data := map[string]any{"Title": title, "Profile": p, "Body": out, "Prune": cmd == "worktrees"}
-		if err := page.ExecuteTemplate(w, "detail.html", data); err != nil {
-			log.Printf("render: %v", err)
-		}
 	}
+	http.NotFound(w, r)
 }
 
 // sudo -n runs only the exact commands in the sudoers file; anything else fails at once.

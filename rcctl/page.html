@@ -1,7 +1,7 @@
 {{define "style"}}<style>
-  :root { --bg: #f7f7f8; --fg: #1d1d20; --muted: #6b6b73; --card: #fff; --line: #e2e2e6; --ok: #1a7f37; --bad: #c62828; --btn: #2f5bd3; }
+  :root { --bg: #f7f7f8; --fg: #1d1d20; --muted: #6b6b73; --card: #fff; --line: #e2e2e6; --ok: #1a7f37; --warn: #9a6700; --bad: #c62828; --btn: #2f5bd3; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #16171b; --fg: #e8e8ec; --muted: #9a9aa3; --card: #202127; --line: #33343c; --ok: #4cc26a; --bad: #ef6b6b; --btn: #5b82f0; }
+    :root { --bg: #16171b; --fg: #e8e8ec; --muted: #9a9aa3; --card: #202127; --line: #33343c; --ok: #4cc26a; --warn: #d4a72c; --bad: #ef6b6b; --btn: #5b82f0; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -9,19 +9,46 @@
   header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
   h1 { font-size: 20px; margin: 0; }
   h2 { font-size: 16px; margin: 0 0 8px; }
+  h3 { font-size: 14px; margin: 10px 0 4px; color: var(--muted); font-weight: 600; }
+  a { color: var(--btn); }
   .muted { color: var(--muted); font-size: 13px; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 14px; }
-  .server { border-top: 1px solid var(--line); padding: 10px 0; display: grid; gap: 4px; }
-  .server:first-of-type { border-top: 0; }
-  .state-active { color: var(--ok); font-weight: 600; }
-  .state-other { color: var(--bad); font-weight: 600; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  button, a.button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--btn); background: transparent; color: var(--btn); text-decoration: none; cursor: pointer; }
+  .health { border-width: 2px; }
+  .health.ok { border-color: var(--ok); }
+  .health.warn { border-color: var(--warn); }
+  .health.bad { border-color: var(--bad); }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
+  .ok .dot, .dot.ok { background: var(--ok); }
+  .warn .dot, .dot.warn { background: var(--warn); }
+  .bad .dot, .dot.bad { background: var(--bad); }
+  .headline { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .item { border-top: 1px solid var(--line); padding: 8px 0; display: grid; gap: 2px; }
+  .item:first-of-type { border-top: 0; }
+  .split { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .name { overflow-wrap: anywhere; }
+  .app { text-decoration: none; font-size: 18px; line-height: 1; padding: 2px 4px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+  button, a.button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--btn); background: transparent; color: var(--btn); text-decoration: none; cursor: pointer; }
   button:disabled { opacity: .5; cursor: wait; }
   pre { margin: 0; overflow-x: auto; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+  .kind { font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; }
   #msg { min-height: 1.4em; }
 </style>{{end -}}
 {{define "script"}}<script>
+  // Times arrive in UTC; show them in this device's timezone.
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const pad = n => String(n).padStart(2, "0");
+  const clock = d => pad(d.getHours()) + ":" + pad(d.getMinutes()) + (d < midnight ? " " + d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) : "");
+  const ago = d => { const m = Math.round((Date.now() - d) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : clock(d); };
+  document.querySelectorAll("time[datetime]").forEach(t => {
+    const d = new Date(t.getAttribute("datetime"));
+    if (!isNaN(d)) t.textContent = t.dataset.fmt === "ago" ? ago(d) : clock(d);
+  });
+  // "Earlier today" is today in this device's timezone; the server sends the last 36 h.
+  document.querySelectorAll("[data-earlier]").forEach(list => {
+    list.querySelectorAll("[data-last]").forEach(el => { if (new Date(el.dataset.last) < midnight) el.remove(); });
+    if (!list.querySelector("[data-last]")) list.insertAdjacentHTML("beforeend", '<p class="muted">None yet today.</p>');
+  });
   document.querySelectorAll("button[data-post]").forEach(b => b.addEventListener("click", async () => {
     if (!confirm(b.dataset.confirm)) return;
     const msg = document.getElementById("msg");
@@ -34,6 +61,15 @@
     b.disabled = false;
   }));
 </script>{{end -}}
+{{define "session-row"}}
+      <div class="item split" data-last="{{rfc .Last}}">
+        <div>
+          <a class="name" href="/session/{{.Profile}}/{{.ID}}">{{if .Prompt}}{{.Prompt}}{{else}}(new session){{end}}</a>
+          <div class="muted"><time datetime="{{rfc .Last}}" data-fmt="ago">{{rfc .Last}}</time> · {{.Worktree}}</div>
+        </div>
+        <a class="app" href="{{$.AppURL}}" title="Open the Claude app's sessions" aria-label="Open in the Claude app">↗</a>
+      </div>
+{{- end -}}
 <!doctype html>
 <html lang="en">
 <head>
@@ -47,22 +83,20 @@
 <main>
   <header>
     <h1>claude-gw</h1>
-    <span class="muted">{{.Login}} · {{.Rendered}}</span>
+    <span class="muted">{{.Login}} · <time datetime="{{rfc .Rendered}}">{{rfc .Rendered}}</time></span>
   </header>
   <p id="msg" class="muted"></p>
 
-  <section>
-    <h2>Servers</h2>
+  <section class="health {{.Level}}">
+    <p class="headline"><span class="dot"></span>{{.Headline}}</p>
+    <p class="muted">Claude Code {{.Claude}} · deployed {{.Tag}} · {{if .LastCheck.IsZero}}no health check yet{{else}}checked <time datetime="{{rfc .LastCheck}}" data-fmt="ago">{{rfc .LastCheck}}</time>{{end}}</p>
     {{range .Servers}}
-    <div class="server">
-      <div class="row"><strong>{{.Profile}}</strong>
-        <span class="{{if eq .Active "active (running)"}}state-active{{else}}state-other{{end}}">{{.Active}}</span></div>
-      <div class="muted">since {{.Since}} · restarts {{.Restarts}} · {{.Memory}}</div>
+    <div class="item">
+      <div><span class="dot {{.LevelName}}"></span><strong>{{.Profile}}</strong> {{if .Problem}}{{.Problem}}{{else}}running {{.Uptime}}{{end}}</div>
+      <div class="muted">restarts {{.Restarts}} · {{.Memory}}</div>
       <div class="row">
         <button data-post="/restart/{{.Profile}}" data-confirm="Restart {{.Profile}}? Sessions on it reconnect.">Restart</button>
-        <a class="button" href="/logs/{{.Profile}}">Logs</a>
-        <a class="button" href="/sessions/{{.Profile}}">Sessions</a>
-        <a class="button" href="/worktrees/{{.Profile}}">Worktrees</a>
+        <a class="button" href="/logs/{{.Profile}}">Server log</a>
       </div>
     </div>
     {{else}}
@@ -71,19 +105,44 @@
   </section>
 
   <section>
-    <h2>Health</h2>
-    <p class="muted">Deployed {{.Tag}} · Claude Code {{.Claude}}</p>
-    <pre>{{.Health}}</pre>
+    <h2>Sessions</h2>
+    <h3>Now</h3>
+    <div>{{range .Now}}{{template "session-row" (sessionRow . $.AppURL)}}{{else}}<p class="muted">No session in use.</p>{{end}}</div>
+    <h3>Earlier today</h3>
+    <div data-earlier>{{range .Earlier}}{{template "session-row" (sessionRow . $.AppURL)}}{{end}}</div>
   </section>
 
   <section>
     <h2>Alerts</h2>
-    <p class="muted">{{if .Silenced.IsZero}}On{{else}}Silenced until {{.Silenced.Format "15:04 Mon 2 Jan"}} (the urgent "not restarting" alert still sends){{end}}</p>
+    {{range .Problems}}
+    <div class="item"><div><span class="dot {{.LevelName}}"></span><strong>{{.Profile}}</strong> {{.Problem}}{{if not .Since.IsZero}}, since <time datetime="{{rfc .Since}}">{{rfc .Since}}</time>{{end}}</div></div>
+    {{else}}
+    <p class="muted">No current problems.</p>
+    {{end}}
+    <h3>Last 24 hours</h3>
+    {{range .Alerts}}
+    <div class="item">
+      <div><strong>{{.Profile}}</strong> {{.What}} <span class="muted">({{.Priority}})</span></div>
+      <div class="muted">{{.Result}}{{if gt .Count 1}} ×{{.Count}}, <time datetime="{{rfc .First}}">{{rfc .First}}</time> to <time datetime="{{rfc .Last}}">{{rfc .Last}}</time>{{else}} <time datetime="{{rfc .Last}}">{{rfc .Last}}</time>{{end}}</div>
+    </div>
+    {{else}}
+    <p class="muted">No alerts.</p>
+    {{end}}
+    <p class="muted">{{if .Silenced.IsZero}}Alerts on.{{else}}Silenced until <time datetime="{{rfc .Silenced}}">{{rfc .Silenced}}</time>. The urgent "not restarting" alert still sends.{{end}}</p>
     <div class="row">
       <button data-post="/silence/60" data-confirm="Silence health alerts for 1 hour?">Silence 1 h</button>
       <button data-post="/silence/240" data-confirm="Silence health alerts for 4 hours?">Silence 4 h</button>
       {{if not .Silenced.IsZero}}<button data-post="/silence/0" data-confirm="Turn alerts back on?">Alerts on</button>{{end}}
     </div>
+  </section>
+
+  <section>
+    <h2>Worktrees</h2>
+    {{range .Servers}}
+    {{if gt (len $.Servers) 1}}<h3>{{.Profile}}</h3>{{end}}
+    <pre>{{.Worktrees}}</pre>
+    <div class="row"><button data-post="/prune/{{.Profile}}" data-confirm="Remove every worktree that is merged, clean and not in use, and delete its branch?">Prune finished worktrees</button></div>
+    {{end}}
   </section>
 
   <section>

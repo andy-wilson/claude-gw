@@ -26,8 +26,8 @@ rcctl/       Go control page (phase 3); make rcctl builds dist/rcctl
 profiles/    settings.json (-> /etc/claude-code/managed-settings.json), hooks/, workdir-CLAUDE.md
 etc/         claude-rc/*.env.example -> /etc/claude-rc/<profile>.env (never committed); default/rcctl.example
 docs/        design.md: architecture, components, DoD
-tests/       acceptance.md checklist; results/<tag>.md committed per release
-Makefile     deploy TAG=vX.Y | rollback | status | verify | rcctl
+tests/       acceptance.md checklist; results/<tag>.md per release; docker/*.sh (make test-docker)
+Makefile     deploy TAG=vX.Y | rollback | status | verify | rcctl | test-docker
 ```
 
 ## Bring-up (home profile)
@@ -72,7 +72,7 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Let sessions reach a LAN host | `proxmox/firewall.sh allow <ctid> <ip\|cidr> [comment]` (host, all ports, /16 at widest); `remove`, `list` |
 | Control page (opt-in) | laptop: `make rcctl`, copy `dist/rcctl` to `/opt/claude-gw/dist/` in the container, `make deploy`. Then `cp etc/default/rcctl.example /etc/default/rcctl`, set `RCCTL_ALLOW` to your Tailscale login, `systemctl enable --now rcctl`, and open the login URL from `journalctl -u rcctl` once. Needs HTTPS certificates on in the tailnet. Page: `https://claude-gw-ctl.<tailnet>.ts.net` |
 | Silence health alerts | Control page, Alerts: 1 h or 4 h. The urgent "not restarting" alert still sends; permission-prompt notifications are not affected |
-| Clean up session worktrees | Control page, a profile's Worktrees: Prune removes each worktree that is merged into `main`, has no changed, untracked or ignored files, and has no session in it or using it in the last 24 h, and deletes its branch |
+| Clean up session worktrees | Control page, Worktrees: Prune removes each worktree that is merged into `main`, has no changed, untracked or ignored files, and has no session in it or using it in the last 24 h, and deletes its branch |
 
 ## Alerts
 
