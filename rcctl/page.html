@@ -131,7 +131,7 @@
     <p class="muted">No alerts{{if not .Cleared.IsZero}} since cleared at <time datetime="{{rfc .Cleared}}">{{rfc .Cleared}}</time>{{end}}.</p>
     {{end}}
     {{if .Alerts}}<div class="row"><button data-post="/alerts/clear" data-confirm="Clear the alert history? Current problems stay; the journal keeps everything.">Clear history</button></div>{{end}}
-    <p class="muted">{{if .Silenced.IsZero}}Alerts on.{{else}}Silenced until <time datetime="{{rfc .Silenced}}">{{rfc .Silenced}}</time>. The urgent "not restarting" alert still sends.{{end}}</p>
+    <p class="muted">{{if .Silenced.IsZero}}Alerts on.{{else}}Silenced until <time datetime="{{rfc .Silenced}}">{{rfc .Silenced}}</time>. The urgent "down" alert still sends.{{end}}</p>
     <div class="row">
       <button data-post="/silence/60" data-confirm="Silence health alerts for 1 hour?">Silence 1 h</button>
       <button data-post="/silence/240" data-confirm="Silence health alerts for 4 hours?">Silence 4 h</button>

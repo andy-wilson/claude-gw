@@ -126,14 +126,17 @@ func (a *app) file(name string) string {
 	return strings.TrimSpace(string(b))
 }
 
+// readInt returns the number in state file name, or 0.
+func (a *app) readInt(name string) int64 {
+	b, _ := os.ReadFile(filepath.Join(a.state, name))
+	n, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	return n
+}
+
 // silencedUntil returns the end of the current silence, or the zero time.
 func (a *app) silencedUntil() time.Time {
-	b, err := os.ReadFile(filepath.Join(a.state, silenceFile))
-	if err != nil {
-		return time.Time{}
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
-	if err != nil || n <= a.now().Unix() {
+	n := a.readInt(silenceFile)
+	if n <= a.now().Unix() {
 		return time.Time{}
 	}
 	return time.Unix(n, 0)
@@ -202,6 +205,11 @@ func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
 			}
 		}
 	}
+	// The history covers 24 h, so only a clear inside that window can be named on the page.
+	cleared, shownCleared := a.cleared(), time.Time{}
+	if cleared.After(a.now().Add(-24 * time.Hour)) {
+		shownCleared = cleared
+	}
 	data := map[string]any{
 		"Login":     login,
 		"Level":     levelNames[worst],
@@ -211,13 +219,13 @@ func (a *app) index(w http.ResponseWriter, r *http.Request, login string) {
 		"Problems":  problems,
 		"Now":       now,
 		"Earlier":   earlier,
-		"Alerts":    a.alertHistory(ctx),
+		"Alerts":    a.alertHistory(ctx, cleared),
 		"AppURL":    appURL,
 		"Tag":       a.file("DEPLOYED_TAG"),
 		"Claude":    a.file("CLAUDE_VERSION"),
 		"Update":    a.journal(ctx, "claude-rc-update.service", 12),
 		"Silenced":  a.silencedUntil(),
-		"Cleared":   a.cleared(),
+		"Cleared":   shownCleared,
 		"Rendered":  a.now(),
 	}
 	if err := page.ExecuteTemplate(w, "page.html", data); err != nil {
@@ -289,21 +297,18 @@ func (a *app) prune(w http.ResponseWriter, r *http.Request, login string) {
 	a.action(w, r, login, "prune "+p, inspect, p, "prune")
 }
 
-// cleared returns when the alert history was last cleared, or the zero time.
+// cleared returns when the alert history was last cleared (nanoseconds: an alert in the same
+// second as the click must sort correctly), or the zero time.
 func (a *app) cleared() time.Time {
-	b, err := os.ReadFile(filepath.Join(a.state, clearedFile))
-	if err != nil {
+	n := a.readInt(clearedFile)
+	if n == 0 {
 		return time.Time{}
 	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
-	if err != nil {
-		return time.Time{}
-	}
-	return time.Unix(n, 0)
+	return time.Unix(0, n)
 }
 
 func (a *app) clearAlerts(w http.ResponseWriter, r *http.Request, login string) {
-	err := os.WriteFile(filepath.Join(a.state, clearedFile), []byte(strconv.FormatInt(a.now().Unix(), 10)+"\n"), 0o644)
+	err := os.WriteFile(filepath.Join(a.state, clearedFile), []byte(strconv.FormatInt(a.now().UnixNano(), 10)+"\n"), 0o644)
 	log.Printf("action=%q by=%s from=%s err=%v", "clear alert history", login, r.RemoteAddr, err)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -174,7 +174,7 @@ func TestHealthLevels(t *testing.T) {
 		{"alerting misses", showActive, journal(6, "cc-home: miss 1 (x)", 4, "cc-home: miss 2 (x)", 2, "cc-home: miss 3 (x)"), "warn", "cc-home unhealthy: 3 missed checks"},
 		{"degraded", showActive, journal(2, "cc-home: degraded (Remote credentials fetch failed)"), "warn", "cc-home needs attention: Remote credentials fetch failed"},
 		{"restarting", "ActiveState=activating\nSubState=auto-restart\n", "", "warn", "cc-home restarting (auto-restart)"},
-		{"failed", "ActiveState=failed\nSubState=failed\nInactiveEnterTimestamp=@1793447000\n", journal(2, "cc-home: healthy"), "bad", "cc-home down, not restarting"},
+		{"failed", "ActiveState=failed\nSubState=failed\nInactiveEnterTimestamp=@1793447000\n", journal(2, "cc-home: healthy"), "bad", "cc-home down, retrying every 2 min"},
 	} {
 		a, _, out := testApp(t)
 		out["systemctl show"], out["journalctl -t rc-health"] = c.show, c.health
@@ -210,7 +210,7 @@ func TestAlertHistory(t *testing.T) {
 		10, "profile=cc-home kind=recovered priority=low result=sent what=recovered",
 		9, "not an rc-alert record",
 	)
-	rows := a.alertHistory(context.Background())
+	rows := a.alertHistory(context.Background(), time.Time{})
 	if len(rows) != 3 {
 		t.Fatalf("want 3 rows (recovered, sent, silenced x3), got %+v", rows)
 	}
@@ -338,5 +338,21 @@ func TestClearAlerts(t *testing.T) {
 	do(a, "POST", "/alerts/clear", "owner:1", true)
 	if !strings.Contains(body(a, "/"), "recovered") {
 		t.Error("an alert after the clear is hidden")
+	}
+	// Same second: an alert 0.4 s before the click stays hidden.
+	out["journalctl -t rc-alert"] = fmt.Sprintf("{\"__REALTIME_TIMESTAMP\":\"%d\",\"MESSAGE\":%q}\n",
+		testNow.Add(500*time.Millisecond).UnixMicro(), "profile=cc-home kind=recovered priority=low result=sent what=recovered")
+	a.now = func() time.Time { return testNow.Add(900 * time.Millisecond) }
+	do(a, "POST", "/alerts/clear", "owner:1", true)
+	if !strings.Contains(body(a, "/"), "No alerts since cleared at") {
+		t.Error("an alert from before the click, same second, shows")
+	}
+	// A clear older than the 24 h window is not named.
+	a.now = func() time.Time { return testNow.Add(-48 * time.Hour) }
+	do(a, "POST", "/alerts/clear", "owner:1", true)
+	out["journalctl -t rc-alert"] = ""
+	a.now = func() time.Time { return testNow }
+	if b := body(a, "/"); strings.Contains(b, "since cleared") {
+		t.Error("a clear older than 24 h is named")
 	}
 }

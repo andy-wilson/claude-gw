@@ -18,8 +18,8 @@ HOST="$(hostname -s)"
 case "$kind" in
   unit-failed)
     # No log lines in the body (design: nothing lab-specific leaves the house).
-    prio=urgent; tags=rotating_light; what="DOWN, not restarting"; title="claude-gw: $PROFILE DOWN, not restarting"
-    body="claude-rc@$PROFILE on $HOST hit its restart limit. Needs a hand: ssh in, check journalctl -u claude-rc@$PROFILE, then systemctl reset-failed claude-rc@$PROFILE && systemctl start claude-rc@$PROFILE" ;;
+    prio=urgent; tags=rotating_light; what="DOWN, retrying"; title="claude-gw: $PROFILE DOWN"
+    body="claude-rc@$PROFILE on $HOST hit its restart limit. The health check retries every 2 min; if it stays down, check journalctl -u claude-rc@$PROFILE." ;;
   down)
     prio=high; tags=warning; what="unhealthy, $arg missed checks"; title="claude-gw: $PROFILE unhealthy"
     body="Health check missed $arg times on $HOST; restart requested. If this repeats, see journalctl -u claude-rc@$PROFILE." ;;

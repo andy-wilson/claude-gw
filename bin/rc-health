@@ -72,6 +72,9 @@ for p in "${profiles[@]}"; do
       # State moves on only once an alert is sent: silenced (exit 3) or failed, it retries next check.
       if [ "$alerted" != true ] || PROFILE=$p rc-alert recovered; then
         echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
+      else
+        # The outage is over even if its "recovered" push is not: the next outage's urgent alert sends.
+        jq '.urgent=false' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
       fi
     fi
     say "$p: healthy"
@@ -104,6 +107,7 @@ for p in "${profiles[@]}"; do
   if [ "$misses" -ge "$MISS_ALERT_AT" ] && [ "$alerted" != true ]; then
     PROFILE=$p rc-alert down "$misses" && alerted=true
   fi
-  jq --argjson m "$misses" --argjson a "$alerted" '.misses=$m | .alerted=$a' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+  # .alerted or $a: claude-rc-alert@ may have set it since this check read the state.
+  jq --argjson m "$misses" --argjson a "$alerted" '.misses=$m | .alerted=(.alerted or $a)' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
 done
 exit $rc
