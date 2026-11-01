@@ -24,7 +24,8 @@ sessions() {  # <config dir>
 # One tab-separated line per linked worktree: path, branch, merged, clean, in use.
 #   merged: the branch is in main (a new session's untouched branch is too, hence "in use")
 #   clean:  no changed, untracked or ignored files (worktree removal deletes ignored ones)
-#   in use: a profile process has its cwd inside it, or its transcripts changed in the last 24 h
+#   in use: a profile process has its cwd inside it, or transcripts for it or a subdirectory
+#           changed in the last 24 h
 scan() {  # <config dir> <workdir>
   cd "$2"
   local cwds path branch merged clean inuse st tdir
@@ -34,11 +35,12 @@ scan() {  # <config dir> <workdir>
     awk '/^worktree /{p=substr($0,10); b=""} /^branch /{b=substr($0,19)} /^$/{if (n++) print p "\t" b}' |
   while IFS=$'\t' read -r path branch; do
     merged=no; [ -n "$branch" ] && git merge-base --is-ancestor "refs/heads/$branch" refs/heads/main && merged=yes
-    clean=no; st="$(git -C "$path" status --porcelain --ignored)" && [ -z "$st" ] && clean=yes
+    clean=no; st="$(git -C "$path" status --porcelain --ignored 2>/dev/null)" && [ -z "$st" ] && clean=yes
     inuse=no; printf '%s\n' "$cwds" | awk -v p="$path" '$0 == p || index($0, p "/") == 1 {f=1} END {exit !f}' && inuse=yes
     # Claude keeps a directory's transcripts under projects/<path with non-alphanumerics as ->.
-    tdir="$1/projects/$(printf '%s' "$path" | sed 's/[^A-Za-z0-9]/-/g')"
-    [ -n "$(find "$tdir" -mmin -1440 -print -quit 2>/dev/null)" ] && inuse=yes
+    # The -* also matches a sibling worktree's name; that errs towards keeping it.
+    tdir="$(printf '%s' "$path" | sed 's/[^A-Za-z0-9]/-/g')"
+    [ -n "$(find "$1/projects" -mindepth 2 -maxdepth 2 \( -path "*/$tdir/*" -o -path "*/$tdir-*/*" \) -mmin -1440 -print -quit 2>/dev/null)" ] && inuse=yes
     printf '%s\t%s\t%s\t%s\t%s\n' "$path" "${branch:-(detached)}" "$merged" "$clean" "$inuse"
   done
 }
@@ -52,13 +54,13 @@ worktrees() {  # <config dir> <workdir>
 
 # git itself refuses to remove a dirty worktree or delete an unmerged branch: each check holds twice.
 prune() {  # <config dir> <workdir>
-  local list n=0 path branch
+  local list n=0 path branch out
   list="$(scan "$1" "$2")"
   while IFS=$'\t' read -r path branch; do
     git -C "$2" worktree remove "$path" || continue
     n=$((n + 1))
-    if git -C "$2" branch -d "$branch" >/dev/null 2>&1; then echo "removed $branch"
-    else echo "removed the $branch worktree; kept the branch (git -d checks it against the checked-out branch, not main)"; fi
+    if out="$(git -C "$2" branch -d "$branch" 2>&1)"; then echo "removed $branch"
+    else echo "removed the $branch worktree; kept the branch: $out"; fi
   done < <(printf '%s\n' "$list" | awk -F'\t' '$3 == "yes" && $4 == "yes" && $5 == "no" {print $1 "\t" $2}')
   echo "pruned $n worktree(s)"
 }
@@ -71,9 +73,11 @@ fi
 PROFILE="${1:?profile}"; cmd="${2:?sessions|worktrees|prune}"
 [[ $PROFILE =~ ^[a-z0-9-]+$ ]] || { echo "bad profile" >&2; exit 2; }
 case "$cmd" in sessions|worktrees|prune) ;; *) echo "unknown command $cmd" >&2; exit 2 ;; esac
-# Only the two paths reach the profile, not the ntfy token. Quotes go, as systemd drops them.
+# Only the two paths reach the profile, not the ntfy token. Read as systemd does: outer
+# whitespace trimmed, one pair of enclosing quotes removed.
 env_file="/etc/claude-rc/$PROFILE.env"
-config="$(sed -n 's/^CLAUDE_CONFIG_DIR=//p' "$env_file" | tr -d "\"'")"; workdir="$(sed -n 's/^WORKDIR=//p' "$env_file" | tr -d "\"'")"
+val() { sed -n "s/^$1=//p" "$env_file" | sed -E "s/^[[:space:]]+|[[:space:]]+\$//g; s/^\"(.*)\"\$/\1/; s/^'(.*)'\$/\1/"; }
+config="$(val CLAUDE_CONFIG_DIR)"; workdir="$(val WORKDIR)"
 : "${config:?no CLAUDE_CONFIG_DIR in $env_file}" "${workdir:?no WORKDIR in $env_file}"
 cd /
 exec runuser -u "$PROFILE" -- env -i PATH=/usr/bin:/bin HOME="/home/$PROFILE" "$(readlink -f "$0")" --as-profile "$cmd" "$config" "$workdir"

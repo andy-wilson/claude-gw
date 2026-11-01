@@ -13,7 +13,7 @@ CTID="${CTID:?set CTID, e.g. 120}"
 HOSTNAME="${HOSTNAME_CT:-claude-gw}"
 STORAGE="${STORAGE:-local-lvm}"               # rootfs storage
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"  # where templates live
-TEMPLATE="${TEMPLATE:-debian-12-standard_12.7-1_amd64.tar.zst}"
+TEMPLATE="${TEMPLATE:-}"                       # default: newest debian-13-standard
 BRIDGE="${BRIDGE:-vmbr0}"
 IP="${IP:-dhcp}"                               # or 192.168.1.50/24
 GW="${GW:-}"                                   # only needed with a static IP
@@ -29,6 +29,11 @@ if pct status "$CTID" >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -z "$TEMPLATE" ]; then
+  pveam update
+  TEMPLATE="$(pveam available --section system | awk '$2 ~ /^debian-13-standard_.*_amd64\.tar\.zst$/ {print $2}' | sort -V | tail -n1)"
+  [ -n "$TEMPLATE" ] || { echo "no debian-13-standard template listed by pveam; set TEMPLATE=" >&2; exit 1; }
+fi
 if [ ! -f "/var/lib/vz/template/cache/$TEMPLATE" ]; then
   echo "Downloading template $TEMPLATE"
   pveam update
