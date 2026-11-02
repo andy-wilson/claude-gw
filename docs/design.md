@@ -316,7 +316,7 @@ Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 
 | Phase | Status (2026-11-02) |
 | --- | --- |
-| 1 | AT1-3 pass; AT9 (off-network) and AT15 (Trusted Devices) deferred |
+| 1 | AT1-3 and AT9 pass; AT15 (Trusted Devices) deferred |
 | 2 | Complete: AT4-8, AT13 and AT16 pass (`v0.6.8`); AT17 opt-in (firewall not enabled) |
 | 3 | Complete: AT10 and AT14 pass (`v0.6.4`) |
 | 4 | Not started |
