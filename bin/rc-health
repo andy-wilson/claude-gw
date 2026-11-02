@@ -8,6 +8,8 @@
 #               consecutive misses. Every check retries, so a server systemd gave up on recovers
 #               once the cause (an outage, say) clears.
 #   degraded  = fatal pattern in the log        -> alert once per distinct pattern, restart
+#   disconnected = up, but the client's last connection line is an error -> no restart (it is
+#               retrying; a restart does not fix the network); alert once offline DISCONNECT_ALERT_AFTER s
 # State in /var/lib/claude-rc/health-<profile>.json so alerts don't repeat every 2 min.
 #
 #   rc-health --ready   read-only: exit 0 once every server is healthy and has been up 10 s.
@@ -21,6 +23,7 @@ export PATH="/usr/local/bin:$PATH"
 STATE_DIR=/var/lib/claude-rc
 LOG_DIR=/var/log/claude-rc
 MISS_ALERT_AT="${MISS_ALERT_AT:-2}"
+DISCONNECT_ALERT_AFTER="${DISCONNECT_ALERT_AFTER:-240}"
 # Patterns Claude Code prints when Remote Control is broken in a way a restart won't fix.
 FATAL_RE='Remote credentials fetch failed|requires a claude.ai subscription|full-scope login token|disabled by your organization|Remote Control isn.t enabled|Couldn.t verify Remote Control eligibility|giving up'
 
@@ -33,7 +36,7 @@ mapfile -t profiles < <(ls /etc/systemd/system/multi-user.target.wants/ 2>/dev/n
 # logger when run by hand, so rcctl sees both.
 say() { echo "$1"; [ -n "${INVOCATION_ID:-}" ] || logger -t rc-health "$1" 2>/dev/null || true; }
 
-# Sets active, has_tmux, has_proc and fatal for profile $1.
+# Sets active, has_tmux, has_proc, fatal and offline (seconds, empty when connected) for profile $1.
 probe() {
   local p="$1"
   active=$(systemctl is-active "claude-rc@$p" 2>/dev/null || true)
@@ -44,9 +47,15 @@ probe() {
   if systemctl show -p ControlGroup --value "claude-rc@$p" | grep -q . \
      && pgrep -u "$p" -f 'claude remote-control|claude-code' >/dev/null 2>&1; then has_proc=yes; fi
 
-  fatal=""
+  fatal=""; offline=""
   if [ -f "$LOG_DIR/$p.log" ]; then
     fatal=$(tail -n 60 "$LOG_DIR/$p.log" | grep -oE "$FATAL_RE" | tail -n1 || true)
+    # While the client retries, the process stays up; until it gives up (about 11 min) its last
+    # connection line is the only sign of an outage. ANSI stripped: the status line is redrawn.
+    local last
+    last=$(tail -n 200 "$LOG_DIR/$p.log" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' \
+      | grep -aoE 'Connection error, retrying in [0-9.]+s \([0-9]+s elapsed\)|Reconnected after|Connected · ' | tail -n1 || true)
+    case "$last" in "Connection error"*) offline=$(sed -E 's/.*\(([0-9]+)s elapsed\)/\1/' <<<"$last") ;; esac
   fi
 }
 
@@ -65,10 +74,24 @@ for p in "${profiles[@]}"; do
   state="$STATE_DIR/health-$p.json"
   [ -f "$state" ] || echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"
   misses=$(jq -r .misses "$state"); alerted=$(jq -r .alerted "$state"); degraded=$(jq -r .degraded "$state")
+  since=$(jq -r '.offline // 0' "$state")
   probe "$p"
 
+  if [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ] && [ -n "$offline" ]; then
+    rc=1
+    # The log line's elapsed lags by up to one retry interval, so keep the earliest start seen.
+    now=$(date +%s); start=$((now - offline))
+    [ "$since" -gt 0 ] && [ "$since" -lt "$start" ] && start=$since
+    say "$p: disconnected $((now - start))s (reconnecting)"
+    if [ $((now - start)) -ge "$DISCONNECT_ALERT_AFTER" ] && [ "$alerted" != true ]; then
+      PROFILE=$p rc-alert disconnected "$(( (now - start) / 60 )) min" && alerted=true
+    fi
+    jq --argjson s "$start" --argjson a "$alerted" '.offline=$s | .alerted=(.alerted or $a)' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    continue
+  fi
+
   if [ "$active" = active ] && [ $has_tmux = yes ] && [ $has_proc = yes ] && [ -z "$fatal" ]; then
-    if [ "$alerted" = true ] || [ "$misses" -gt 0 ] || [ -n "$degraded" ]; then
+    if [ "$alerted" = true ] || [ "$misses" -gt 0 ] || [ -n "$degraded" ] || [ "$since" -gt 0 ]; then
       # State moves on only once an alert is sent: silenced (exit 3) or failed, it retries next check.
       if [ "$alerted" != true ] || PROFILE=$p rc-alert recovered; then
         echo '{"misses":0,"alerted":false,"degraded":""}' > "$state"

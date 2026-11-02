@@ -83,7 +83,7 @@ ntfy.sh topic per profile (`NTFY_TOPIC` in the env file). Bodies are deliberatel
 | Priority | Source | Meaning |
 | --- | --- | --- |
 | urgent | `claude-rc-alert@` (systemd OnFailure) | Unit hit its restart limit. Sent once per outage; `rc-health` keeps retrying every 2 min and sends "recovered" when it comes back |
-| high | `rc-health` | Two consecutive missed checks, or a fatal pattern in the log |
+| high | `rc-health` | Two consecutive missed checks, a fatal pattern in the log, or the client unable to reach Anthropic for 4 min (`DISCONNECT_ALERT_AFTER`; no restart, it is retrying) |
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle |
 | low | `rc-health` | Recovered |
 

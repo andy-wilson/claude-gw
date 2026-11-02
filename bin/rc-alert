@@ -23,6 +23,9 @@ case "$kind" in
   down)
     prio=high; tags=warning; what="unhealthy, $arg missed checks"; title="claude-gw: $PROFILE unhealthy"
     body="Health check missed $arg times on $HOST; restart requested. If this repeats, see journalctl -u claude-rc@$PROFILE." ;;
+  disconnected)
+    prio=high; tags=warning; what="disconnected $arg, reconnecting"; title="claude-gw: $PROFILE disconnected"
+    body="Remote Control on $HOST has not reached Anthropic for $arg; the client keeps retrying. Check the network. \"recovered\" follows when it reconnects." ;;
   degraded)
     prio=high; tags=warning; what="needs attention: $arg"; title="claude-gw: $PROFILE needs attention"
     body="$arg on $HOST. The process is up but Remote Control may be unusable." ;;

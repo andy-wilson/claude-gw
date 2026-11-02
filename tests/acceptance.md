@@ -11,7 +11,7 @@ Result column (PASS / FAIL / SKIP + one line of evidence), commit with the tag.
 | AT3 | Session reaches lab hosts | prompt: `ssh <labhost> uptime` | real output | 1 | |
 | AT4 | Process crash recovers | in CT: `pkill -9 -u cc-home -f remote-control` | `systemctl is-active claude-rc@cc-home` back within 20 s; card online in app within 60 s | 2 | |
 | AT5 | Container reboot recovers | host: `pct reboot <CTID>` | card online within 2 min; no manual step | 2 | |
-| AT6 | Network outage recovers | host firewall: block CT outbound 443 for 15 min, unblock | server exited and restarted; card online within 2 min of unblock; ntfy `high` received during outage | 2 | |
+| AT6 | Network outage recovers | host firewall: block CT outbound 443 for 15 min, unblock | ntfy `high` "disconnected" about 4 min in (client retrying, no restart); if the client gives up, the server restarts; card online within 2 min of unblock; one "recovered" push | 2 | |
 | AT7 | Hard failure alerts | in CT: `chmod 000 /usr/local/bin/rc-start; systemctl restart claude-rc@cc-home` and wait | `claude-rc-alert@cc-home` fired; ntfy `urgent` on phone within 2 min of 5th failure; then `chmod 755` + `systemctl reset-failed` restores | 2 | |
 | AT8 | Hung process caught | in CT: `pkill -STOP -u cc-home -f remote-control` | restart within 2 min; ntfy `high` then `low` recovery | 2 | |
 | AT9 | Tailscale + SSH fallback | phone on mobile data, Tailscale app connected, phone key in root's `authorized_keys`: Blink/Termius → `ssh root@<tailnet IP>` with the key named explicitly (Blink: `ssh -i <key> ...` or a saved host; its agent offers nothing by default); `sudo -u cc-home tmux -L rc-cc-home attach` | attached to the live server; `Ctrl-b d` detaches cleanly | 1 | |

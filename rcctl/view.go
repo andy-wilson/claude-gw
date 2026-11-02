@@ -105,12 +105,12 @@ func (a *app) journalJSON(ctx context.Context, args ...string) []journalEntry {
 // verdict is rc-health's latest word on a profile; streak is when the current run of misses began.
 type verdict struct {
 	At, Streak time.Time
-	Kind       string // healthy, miss, degraded, or "" if none yet
+	Kind       string // healthy, miss, degraded, disconnected, or "" if none yet
 	Misses     int
 	Reason     string
 }
 
-var verdictRE = regexp.MustCompile(`^([a-z0-9-]+): (healthy|miss (\d+)|degraded \((.*)\))`)
+var verdictRE = regexp.MustCompile(`^([a-z0-9-]+): (healthy|miss (\d+)|degraded \((.*)\)|disconnected (\d+)s)`)
 
 func (a *app) verdicts(ctx context.Context) map[string]verdict {
 	vs := map[string]verdict{}
@@ -125,6 +125,10 @@ func (a *app) verdicts(ctx context.Context) map[string]verdict {
 		switch {
 		case m[2] == "healthy":
 			v.Kind, v.Misses, v.Reason, v.Streak = "healthy", 0, "", time.Time{}
+		case m[5] != "":
+			// rc-health measures the outage itself, so its start is not this verdict's time.
+			s, _ := strconv.Atoi(m[5])
+			v.Kind, v.Misses, v.Reason, v.Streak = "disconnected", 0, "", e.At.Add(-time.Duration(s)*time.Second)
 		case m[3] != "":
 			v.Kind, v.Reason = "miss", ""
 			v.Misses, _ = strconv.Atoi(m[3])
@@ -198,6 +202,8 @@ func (a *app) status(ctx context.Context, p string, v verdict) server {
 		s.Level, s.Problem, s.Since = levelWarn, "unhealthy: "+plural(v.Misses, "missed check", "missed checks"), v.Streak
 	case v.Kind == "degraded":
 		s.Level, s.Problem, s.Since = levelWarn, "needs attention: "+v.Reason, v.Streak
+	case v.Kind == "disconnected":
+		s.Level, s.Problem, s.Since = levelWarn, "disconnected, reconnecting", v.Streak
 	}
 	return s
 }
