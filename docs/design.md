@@ -314,10 +314,10 @@ flowchart LR
 
 Each phase ends with a backup and a repo tag (`v0.1`, `v0.2`, ...).
 
-| Phase | Status (2026-11-01) |
+| Phase | Status (2026-11-02) |
 | --- | --- |
 | 1 | AT1-3 pass; AT9 (off-network) and AT15 (Trusted Devices) deferred |
-| 2 | AT7, AT8 and AT16 pass; AT4-6 and AT13 not yet run; AT17 opt-in (firewall not enabled) |
+| 2 | AT4-8, AT13 and AT16 pass; AT9 and AT15 deferred; AT17 opt-in (firewall not enabled) |
 | 3 | Complete: AT10 and AT14 pass (`v0.6.4`) |
 | 4 | Not started |
 
