@@ -41,6 +41,8 @@ rc-alert deployed "v0.6.3 (was v0.6.2)"; rc=$?
 check "deploy notice sent low and recorded" '[ $rc = 0 ] && grep -q "^low claude-gw deployed v0.6.3 (was v0.6.2)" /tmp/sent && [ "$(last)" = "profile=cc-home kind=deployed priority=low result=sent what=deployed v0.6.3 (was v0.6.2), healthy" ]'
 rc-alert deploy-unhealthy "v0.6.3 (was v0.6.2)"
 check "unhealthy deploy notice is high and says so" 'grep -q "^high claude-gw deployed v0.6.3 (was v0.6.2): cc-home NOT healthy" /tmp/sent'
+rc-alert disconnected "4 min" >/dev/null
+check "disconnected alert is high and recorded" 'grep -q "^high claude-gw: cc-home disconnected" /tmp/sent && [ "$(last)" = "profile=cc-home kind=disconnected priority=high result=sent what=disconnected 4 min, reconnecting" ]'
 rm -f /var/lib/claude-rc/health-cc-home.json
 rc-alert bogus 2>/dev/null; rc=$?
 check "unknown kind exits 2" '[ $rc = 2 ]'
@@ -53,7 +55,7 @@ case "$1" in
   is-active) echo "$ACTIVE"; [ "$ACTIVE" = active ];;
   show) echo /x;;
   # RACE: claude-rc-alert@ sends the urgent alert while rc-health is mid-check.
-  restart) [ -z "$RACE" ] || { f=/var/lib/claude-rc/health-cc-home.json; jq '.alerted=true | .urgent=true' $f > $f.t && mv $f.t $f; };;
+  restart) echo restart >> /tmp/restarts; [ -z "$RACE" ] || { f=/var/lib/claude-rc/health-cc-home.json; jq '.alerted=true | .urgent=true' $f > $f.t && mv $f.t $f; };;
   *) :;;
 esac
 X
@@ -81,5 +83,31 @@ RACE=1 health inactive 3
 check "an urgent alert sent mid-check keeps alerted" '[ "$(state)" = "[1,true]" ]'
 health active 0
 check "so recovery is pushed after it" '[ "$(tail -n1 /tmp/alerts)" = recovered ] && [ "$(state)" = "[0,false]" ]'
+
+# Disconnected: the real client lines from a 4 min outage (v0.6.9 capture), with the ANSI the pane log carries.
+L=/var/log/claude-rc/cc-home.log; E=$(printf '\033')
+log() { printf '%s\n' "$@" >> $L; }
+: > /tmp/alerts; rm -f /tmp/restarts; log "${E}[32m·✔︎· Connected · home${E}[0m"
+health active 0
+check "connected server is healthy" '[ "$(state)" = "[0,false]" ] && [ ! -s /tmp/alerts ]'
+log "Connection error, retrying in 32.8s (33s elapsed):" "${E}[33m·|· Reconnecting · retrying in 32.8s · disconnected 33s${E}[0m"
+ACTIVE=active ALERT_RC=0 rc-health > /tmp/out
+check "reconnecting client is disconnected, no restart, no alert yet" 'grep -q "disconnected 3[3-5]s (reconnecting)" /tmp/out && [ ! -s /tmp/alerts ]'
+log "Connection error, retrying in 98.1s (145s elapsed):"
+health active 0
+check "still under 4 min: no alert" '[ ! -s /tmp/alerts ]'
+# The earliest start is kept: a log line lagging its retry interval does not shorten the outage.
+f=/var/lib/claude-rc/health-cc-home.json; jq ".offline = $(( $(date +%s) - 250 ))" $f > $f.t && mv $f.t $f
+health active 0
+check "4 min offline sends one disconnected alert" '[ "$(cat /tmp/alerts)" = disconnected ] && [ "$(state)" = "[0,true]" ]'
+health active 0
+check "no repeat" '[ "$(grep -c disconnected /tmp/alerts)" = 1 ]'
+log "Reconnected after 4m 5s"
+health active 0
+check "no restart while disconnected" '[ ! -e /tmp/restarts ]'
+check "reconnect pushes recovered and clears the outage" '[ "$(tail -n1 /tmp/alerts)" = recovered ] && [ "$(jq -c "[.misses, .alerted, .offline // 0]" $f)" = "[0,false,0]" ]'
+log "Connection error, retrying in 1.8s (0s elapsed):"
+health active 0
+check "a new outage starts afresh" '[ "$(jq -r ".offline" $f)" -ge $(( $(date +%s) - 5 )) ]'
 
 echo "$fails failure(s)"; exit $((fails > 0))

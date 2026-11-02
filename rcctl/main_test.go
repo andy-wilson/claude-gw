@@ -173,6 +173,7 @@ func TestHealthLevels(t *testing.T) {
 		{"first miss", showActive, journal(4, "cc-home: healthy", 2, "cc-home: miss 1 (active=active tmux=no proc=no)"), "warn", "cc-home 1 missed check (alerts at 2)"},
 		{"alerting misses", showActive, journal(6, "cc-home: miss 1 (x)", 4, "cc-home: miss 2 (x)", 2, "cc-home: miss 3 (x)"), "warn", "cc-home unhealthy: 3 missed checks"},
 		{"degraded", showActive, journal(2, "cc-home: degraded (Remote credentials fetch failed)"), "warn", "cc-home needs attention: Remote credentials fetch failed"},
+		{"disconnected", showActive, journal(4, "cc-home: healthy", 2, "cc-home: disconnected 145s (reconnecting)"), "warn", "cc-home disconnected, reconnecting"},
 		{"restarting", "ActiveState=activating\nSubState=auto-restart\n", "", "warn", "cc-home restarting (auto-restart)"},
 		{"failed", "ActiveState=failed\nSubState=failed\nInactiveEnterTimestamp=@1793447000\n", journal(2, "cc-home: healthy"), "bad", "cc-home down, retrying every 2 min"},
 	} {
@@ -197,6 +198,10 @@ func TestMissStreakSince(t *testing.T) {
 	out["journalctl -t rc-health"] = journal(9, "cc-home: miss 1 (x)", 7, "cc-home: healthy", 5, "cc-home: miss 1 (x)", 3, "cc-home: miss 2 (x)")
 	if v := a.verdicts(context.Background())["cc-home"]; v.Misses != 2 || !v.Streak.Equal(testNow.Add(-5*time.Minute)) {
 		t.Errorf("streak should start at the miss after the last healthy check: %+v", v)
+	}
+	out["journalctl -t rc-health"] = journal(3, "cc-home: disconnected 60s (reconnecting)")
+	if v := a.verdicts(context.Background())["cc-home"]; v.Kind != "disconnected" || !v.Streak.Equal(testNow.Add(-4*time.Minute)) {
+		t.Errorf("a disconnect starts its own reported seconds before the verdict: %+v", v)
 	}
 }
 
