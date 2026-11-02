@@ -89,7 +89,7 @@ Sessions flow through Anthropic's relay: the gateway polls outbound, so nothing 
 
 ### Gateway container
 
-An unprivileged Debian 13 LXC on Proxmox, 2 vCPU, 4 GB RAM, 32 GB disk, created by `proxmox/create-lxc.sh` with `nesting=1,keyctl=1` (systemd needs nesting in an unprivileged container) and `/dev/net/tun` for Tailscale. An LXC rather than a VM because it backs up and restores in seconds and the workload is a Node process plus SSH.
+An unprivileged Debian 13 LXC on Proxmox VE (tested on 9.2, from the `debian-13-standard` template), 2 vCPU, 4 GB RAM, 32 GB disk, created by `proxmox/create-lxc.sh` with `nesting=1,keyctl=1` (systemd needs nesting in an unprivileged container) and `/dev/net/tun` for Tailscale. An LXC rather than a VM because it backs up and restores in seconds and the workload is a Node process plus SSH.
 
 One dedicated lab share from the host is bind-mounted read-write at `/mnt/lab`. It is the only part of the lab filesystem a session can touch. `bootstrap/bootstrap.sh` installs Node, Claude Code, tmux, jq, git and Tailscale, and creates the profile users (`cc-home`, `cc-work`) in a shared `cc-lab` group, each with its own home directory, SSH key pair to lab hosts, and `CLAUDE_CONFIG_DIR`.
 
@@ -118,9 +118,9 @@ systemd owns the lifecycle; tmux owns the pty that `claude remote-control` needs
 | --- | --- | --- |
 | `Type=forking`, `ExecStart=tmux -L rc-%i new-session -d -s rc rc-start` | | tmux detaches; `rc-start` execs `claude`, so the tmux session and the unit end when `claude` exits |
 | `ExecStartPost=tmux pipe-pane ... >> /var/log/claude-rc/%i.log` | | Pane output mirrored to a log for the health check |
-| `Restart=always`, `RestartSec=15` | | Back within 15 s of any exit |
+| `Restart=always`, `RestartSec=15`, `RestartMode=direct` | | Back within 15 s of any exit; with `direct` an automatic restart does not pass through "failed", so `OnFailure` fires only when systemd gives up (systemd 254+) |
 | `StartLimitBurst=5`, `StartLimitIntervalSec=600` | | Five failures in ten minutes stops retrying |
-| `OnFailure=claude-rc-alert@%i.service` | | That stop is the signal that a human is needed |
+| `OnFailure=claude-rc-alert@%i.service` | | That stop sends the urgent alert; `rc-health` keeps retrying |
 | `ProtectHome=tmpfs`, `BindPaths=/home/%i`, `NoNewPrivileges=yes` | | A session cannot see another profile's home |
 
 ```mermaid
@@ -129,14 +129,17 @@ stateDiagram-v2
   Running --> Restarting: claude exits / crashes
   Restarting --> Running: RestartSec=15
   Restarting --> Failed: 5 failures in 10 min
-  Failed --> [*]: OnFailure sends ntfy urgent
+  Failed --> Restarting: rc-health reset-failed + restart, every 2 min (ntfy urgent once per outage)
   Running --> Degraded: health check finds fatal log pattern
   Degraded --> Restarting: rc-health restarts unit (ntfy high once per pattern)
   Running --> Missed: tmux, process or unit missing
   Missed --> Restarting: rc-health restarts unit (ntfy high on 2nd miss)
+  Running --> Disconnected: client logs connection errors, still retrying
+  Disconnected --> Running: client reconnects (ntfy low if alerted)
+  Disconnected --> Degraded: client gives up (about 11 min)
 ```
 
-`claude-rc-health.timer` runs `bin/rc-health` every 2 minutes for every enabled instance. A profile is healthy when the unit is active, its tmux session exists, a `claude` process is running, and the last 60 log lines contain no known fatal pattern (expired credentials, Remote Control disabled, and similar). A miss restarts the unit; two consecutive misses alert. A fatal pattern alerts once per distinct pattern and restarts. A recovery after an alert sends a low-priority message. State lives in root-only `/var/lib/claude-rc` so alerts do not repeat.
+`claude-rc-health.timer` runs `bin/rc-health` every 2 minutes for every enabled instance. A profile is healthy when the unit is active, its tmux session exists, a `claude` process is running, and the last 60 log lines contain no known fatal pattern (expired credentials, Remote Control disabled, and similar). A miss runs `reset-failed` and restarts the unit, so a server systemd gave up on comes back once the cause clears; two consecutive misses alert. A fatal pattern alerts once per distinct pattern and restarts. A server that is up but whose client's last connection line is an error is disconnected: no restart (it is retrying), and one high alert once it has been offline 4 min (`DISCONNECT_ALERT_AFTER`). A recovery after an alert sends a low-priority message. State lives in root-only `/var/lib/claude-rc` so alerts do not repeat.
 
 ### Alerting via ntfy
 
@@ -144,12 +147,12 @@ One ntfy topic per profile on ntfy.sh with an access token. Alert bodies carry o
 
 | Priority | Source | Meaning |
 | --- | --- | --- |
-| urgent | `claude-rc-alert@` (systemd `OnFailure`) | Unit hit its restart limit; needs a human |
-| high | `rc-health` | Two consecutive missed checks, or a fatal pattern in the log |
+| urgent | `claude-rc-alert@` (systemd `OnFailure`) | Unit hit its restart limit; sent once per outage, through a silence. `rc-health` keeps retrying |
+| high | `rc-health` | Two consecutive missed checks, a fatal pattern in the log, or 4 min disconnected |
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle |
 | low | `rc-health` | Recovered |
 
-The `Notification` hook duplicates Claude's own push notifications on purpose: ntfy still works if the Remote Control connection is the thing that broke. A `Stop` hook (`profiles/hooks/handover.sh`) writes the session's last state to `HANDOVER.md` in its working tree, so a fresh session can pick up where a stale one left off.
+The `Notification` hook duplicates Claude's own push notifications on purpose: ntfy still works if the Remote Control connection is the thing that broke. It runs as the profile user, so these pushes are not recorded by `rc-alert` or shown on the control page. A `Stop` hook (`profiles/hooks/handover.sh`) writes the session's last state to `HANDOVER.md` in its working tree, so a fresh session can pick up where a stale one left off.
 
 ### Egress firewall
 
@@ -279,7 +282,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 | AT3 | A session reaches lab hosts | 1 |
 | AT4 | `kill -9` of the server recovers within 60 s | 2 |
 | AT5 | Container reboot recovers within 2 min | 2 |
-| AT6 | 15-minute outbound outage recovers; ntfy high received | 2 |
+| AT6 | Outbound outage: ntfy high "disconnected" about 4 min in, the server recovers without a person within 2 min of the network returning, one "recovered" | 2 |
 | AT7 | Hard failure fires the urgent alert within 2 min | 2 |
 | AT8 | `kill -STOP` (hung process) caught by the health timer | 2 |
 | AT9 | Tailscale + SSH fallback attaches to the live server | 1 |
