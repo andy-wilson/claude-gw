@@ -125,6 +125,31 @@ ntfy.sh topic per profile (`NTFY_TOPIC` in the env file). Bodies are deliberatel
 | high / default / low | Claude `Notification` hook | Permission prompt / question / idle. Sent by the session as the profile user, so not in the `rc-alert` journal or on the control page |
 | low | `rc-health` | Recovered |
 
+## Issues
+
+Search [existing issues](https://github.com/andy-wilson/claude-gw/issues) first, including closed ones. One problem per issue. For a bug, include:
+
+- What you did, what you expected, and what happened instead, with steps that reproduce it.
+- Versions: the gateway tag (`make status`), `claude --version` inside the container, and the Proxmox version.
+- Relevant output from `journalctl -u claude-rc@<profile>` or `make status`. Redact your ntfy token, tailnet name, account emails and any lab hostnames before posting.
+
+For a feature request, describe the problem you are trying to solve before the solution you have in mind.
+
+Do not report security problems in a public issue. Use [private vulnerability reporting](https://github.com/andy-wilson/claude-gw/security/advisories/new) instead, with enough detail to reproduce, and allow time for a fix before disclosing.
+
+## Contributing
+
+Contributions are welcome. For anything beyond a small fix, open an issue first so the approach can be agreed before you write the code.
+
+1. Fork the repo and work in a branch off `main`.
+2. Keep each pull request to one change. Describe what it changes and why, and link the issue.
+3. Read `CLAUDE.md`; its hard rules apply to contributions too. In particular, never commit a `*.env` file or any token, and do not add bind mounts beyond `/mnt/claude-gw`.
+4. Shell is bash with `set -euo pipefail` and must be shellcheck-clean; anything larger is Go. Match the style of the surrounding code.
+5. Run `make verify` (and `go test ./...` in `rcctl` if you touched it) before pushing. If the change affects behaviour on the gateway, say which acceptance tests in `tests/acceptance.md` you ran and their result.
+6. Update `README.md` or `docs/design.md` when you change behaviour they describe.
+
+By submitting a pull request you agree that your contribution is licensed under the MIT License, as for the rest of the project.
+
 ## Warranty
 
 No warranty is implied. Use at your own risk. This software runs an AI agent with access to your lab; you are responsible for what it can reach and what it does.
