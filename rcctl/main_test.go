@@ -29,8 +29,8 @@ type fake map[string]string
 const (
 	// Active since 1 h 45 min before testNow.
 	showActive = "ActiveState=active\nSubState=running\nNRestarts=0\nMemoryCurrent=314572800\nActiveEnterTimestamp=@1793441700\n"
-	sessionsJS = `{"id":"1111aaaa-0000-0000-0000-000000000001","last":"2026-10-31T11:58:00Z","live":true,"dirty":true,"started":"2026-10-31T11:00:00Z","prompt":"fix the <b>build</b>","cwd":"/mnt/lab/home/.claude/worktrees/bridge-a","branch":"bridge-a","activity":[{"ts":"2026-10-31T11:58:00Z","kind":"tool","text":"Bash make test"},{"ts":"2026-10-31T11:57:00Z","kind":"assistant","text":"Looking at it."}]}
-{"id":"2222bbbb-0000-0000-0000-000000000002","last":"2026-10-31T09:00:00Z","live":false,"dirty":false,"started":"","prompt":"","cwd":"/mnt/lab/home/.claude/worktrees/bridge-b","branch":"bridge-b","activity":[]}
+	sessionsJS = `{"id":"1111aaaa-0000-0000-0000-000000000001","last":"2026-10-31T11:58:00Z","live":true,"dirty":true,"started":"2026-10-31T11:00:00Z","prompt":"fix the <b>build</b>","cwd":"/mnt/claude-gw/home/.claude/worktrees/bridge-a","branch":"bridge-a","activity":[{"ts":"2026-10-31T11:58:00Z","kind":"tool","text":"Bash make test"},{"ts":"2026-10-31T11:57:00Z","kind":"assistant","text":"Looking at it."}]}
+{"id":"2222bbbb-0000-0000-0000-000000000002","last":"2026-10-31T09:00:00Z","live":false,"dirty":false,"started":"","prompt":"","cwd":"/mnt/claude-gw/home/.claude/worktrees/bridge-b","branch":"bridge-b","activity":[]}
 `
 )
 

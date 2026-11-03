@@ -36,7 +36,7 @@ RestartMode=direct
 # Belt and braces: don't let a session see the other profile's home.
 ProtectHome=tmpfs
 BindPaths=/home/%i
-ReadWritePaths=/mnt/lab /var/log/claude-rc /var/lib/claude-rc
+ReadWritePaths=/mnt/claude-gw /var/log/claude-rc /var/lib/claude-rc
 NoNewPrivileges=yes
 
 [Install]

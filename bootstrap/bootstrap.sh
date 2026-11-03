@@ -62,9 +62,9 @@ log "Directories"
 install -d -m 0750 /etc/claude-rc
 install -d -m 0755 /var/log/claude-rc
 install -d -m 0700 /var/lib/claude-rc
-if [ -d /mnt/lab ]; then
-  chgrp cc-lab /mnt/lab || true
-  chmod 2775 /mnt/lab || true
+if [ -d /mnt/claude-gw ]; then
+  chgrp cc-lab /mnt/claude-gw || true
+  chmod 2775 /mnt/claude-gw || true
 fi
 
 log "sshd: keys only"

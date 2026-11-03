@@ -19,7 +19,7 @@ Goals, in priority order:
 | # | Requirement | How it is met |
 | --- | --- | --- |
 | R1 | Start a new session from mobile or a laptop without shelling in first | `claude remote-control` server mode |
-| R2 | Sessions reach the lab filesystem and lab hosts | One dedicated share bind-mounted at `/mnt/lab`, SSH keys per profile, local MCP servers |
+| R2 | Sessions reach the lab filesystem and lab hosts | One dedicated share bind-mounted at `/mnt/claude-gw`, SSH keys per profile, local MCP servers |
 | R3 | Tailscale and SSH access to the gateway as a fallback | Also needed for commands Remote Control cannot run from mobile (`/plugin`, `/resume`, `claude mcp login`) |
 | R4 | Crashed processes restart; the service survives reboots | systemd template unit per profile, tmux as the pty holder |
 | R5 | Alert via ntfy when a restart fails or a server stays down | systemd `OnFailure=` plus a health timer |
@@ -65,7 +65,7 @@ flowchart LR
       end
       health[claude-rc-health.timer<br/>every 2 min]
       sshd[sshd<br/>key auth, tailnet + LAN only]
-      mnt["/mnt/lab"]
+      mnt["/mnt/claude-gw"]
     end
   end
   labhosts[Lab hosts]
@@ -91,7 +91,7 @@ Sessions flow through Anthropic's relay: the gateway polls outbound, so nothing 
 
 An unprivileged Debian 13 LXC on Proxmox VE (tested on 9.2, from the `debian-13-standard` template), 2 vCPU, 4 GB RAM, 32 GB disk, created by `proxmox/create-lxc.sh` with `nesting=1,keyctl=1` (systemd needs nesting in an unprivileged container) and `/dev/net/tun` for Tailscale. An LXC rather than a VM because it backs up and restores in seconds and the workload is a Node process plus SSH.
 
-One dedicated lab share from the host is bind-mounted read-write at `/mnt/lab`. It is the only part of the lab filesystem a session can touch. `bootstrap/bootstrap.sh` installs Node, Claude Code, tmux, jq, git and Tailscale, and creates the profile users (`cc-home`, `cc-work`) in a shared `cc-lab` group, each with its own home directory, SSH key pair to lab hosts, and `CLAUDE_CONFIG_DIR`.
+One dedicated lab share from the host is bind-mounted read-write at `/mnt/claude-gw`. It is the only part of the lab filesystem a session can touch. `bootstrap/bootstrap.sh` installs Node, Claude Code, tmux, jq, git and Tailscale, and creates the profile users (`cc-home`, `cc-work`) in a shared `cc-lab` group, each with its own home directory, SSH key pair to lab hosts, and `CLAUDE_CONFIG_DIR`.
 
 ### Remote Control servers
 
@@ -204,7 +204,7 @@ Run each account as its own Linux user with its own `CLAUDE_CONFIG_DIR` and its 
 | --- | --- | --- | --- |
 | claude.ai account | Personal subscription | Team/Enterprise seat | Remote Control is per subscription; sessions appear only in the account that started them |
 | Linux user + config dir | `cc-home` / `~/.claude-cc-home` | `cc-work` / `~/.claude-cc-work` | Credentials, transcripts and hooks cannot leak across |
-| Working trees + credentials | `/mnt/lab/home`, personal keys | `/mnt/lab/work`, work keys | A session never holds the other account's cloud or git credentials |
+| Working trees + credentials | `/mnt/claude-gw/home`, personal keys | `/mnt/claude-gw/work`, work keys | A session never holds the other account's cloud or git credentials |
 
 On the device side, switching is a matter of which account the Claude app or claude.ai is signed into. Server cards and session lists are per account. Before adding a work profile, confirm an Owner has enabled Remote Control for the organisation and that its data policy permits transcripts on Anthropic servers (C6, C7). A work profile may belong on a second gateway on work infrastructure instead; the same image, units and scripts deploy there with only the env file differing.
 
@@ -218,7 +218,7 @@ The gateway has no inbound ports on the internet; the only ways in are Anthropic
 | SSH | Key auth only; `AllowUsers` limited to the tailnet ranges and `LAN_CIDR` (`bootstrap/bootstrap-tailscale.sh`) |
 | Control page (phase 3) | `tsnet` only (no LAN port); untagged nodes with a login in `RCCTL_ALLOW`; actions need the `X-Rcctl` header and are logged with the caller. Whoever controls an allowed Tailscale login can restart servers, run `rc-update`, read session first prompts, prune finished worktrees and silence the non-urgent alerts for up to 4 h |
 | What a session can do | `--permission-mode acceptEdits`, never `bypassPermissions`; destructive commands still prompt, and the prompt reaches the phone via push and ntfy |
-| Blast radius of a bad prompt | Each profile is a separate unprivileged user; one dedicated share at `/mnt/lab` is the only lab filesystem mounted; cloud and hypervisor credentials scoped to lab-only roles |
+| Blast radius of a bad prompt | Each profile is a separate unprivileged user; one dedicated share at `/mnt/claude-gw` is the only lab filesystem mounted; cloud and hypervisor credentials scoped to lab-only roles |
 | Secrets at rest | Credentials in each profile's config dir (0700); ntfy tokens in `/etc/claude-rc/*.env` (0600 root), never in git. A profile's own sessions can still see its ntfy topic and token in their environment, because the notification hook needs them; use a token that can only publish to that topic |
 | Host | Unprivileged LXC; no other bind mounts |
 | Network reach | Egress firewall on the host (`proxmox/firewall.sh`): DNS, the internet on 22/80/443 and lab hosts on an allowlist; the rest of the LAN and the Proxmox host are dropped. Can be disabled, with a warning |
@@ -232,15 +232,15 @@ The gateway's purpose is to let a remote service run commands inside a private n
 | --- | --- |
 | Your claude.ai account (stolen session, phished login) | Start sessions on the gateway's card from their own device. Trusted Devices raises the bar but is enforced by Anthropic |
 | Anthropic's relay or account system | Start sessions as you without a device, and forge the approvals that answer permission prompts. Prompts and ntfy alerts still fire, but cannot be relied on to stop anything |
-| Model output (malicious or prompt-injected responses, including injected text in files under `/mnt/lab` or a worktree's `HANDOVER.md`) | Tool calls that try to do harm. Permission prompts still apply, so this depends on you approving them, unless combined with a relay compromise |
+| Model output (malicious or prompt-injected responses, including injected text in files under `/mnt/claude-gw` or a worktree's `HANDOVER.md`) | Tool calls that try to do harm. Permission prompts still apply, so this depends on you approving them, unless combined with a relay compromise |
 | The npm package (malicious release) | Code runs as root during `npm install -g` (bootstrap, `rc-update`), then as each profile user every time a server starts. No Claude Code control applies; deny rules and permission modes are enforced by the very code that is compromised |
 
 What a compromised gateway can reach is everything the profile's Linux user can reach, because that is the only boundary not owned by Anthropic:
 
-- `/mnt/lab` read-write: read, exfiltrate, encrypt or delete it, and plant files that prompt-inject later sessions.
+- `/mnt/claude-gw` read-write: read, exfiltrate, encrypt or delete it, and plant files that prompt-inject later sessions.
 - The network: the container sits on the LAN bridge and the tailnet with unrestricted egress unless the egress firewall is on, so it can scan and attack other LAN hosts, other tailnet nodes the Tailscale ACLs allow, and anything on the internet.
 - Credentials in the profile's home: the claude.ai login, the profile's ntfy token, and any SSH keys or cloud credentials placed there, which turn into lateral movement to those hosts and accounts.
-- Persistence as that user: user crontab, shell rc files, git hooks in the worktrees, modified files in `/mnt/lab`.
+- Persistence as that user: user crontab, shell rc files, git hooks in the worktrees, modified files in `/mnt/claude-gw`.
 
 What it cannot reach without a further local or kernel exploit: root in the container (the profile has no sudo; the only sudoers entry is for the phase 3 `rcctl` user), the other profile's home and credentials, the root-only env files, the Proxmox host (unprivileged LXC, so container root maps to an unprivileged host uid), and host-side ZFS snapshots of the share. A malicious npm release is the exception: it runs as root in the container, so treat the whole container as lost and restore it from a vzdump backup.
 
@@ -277,7 +277,7 @@ Done means every test for the phase passes on the deployed tag, from a device th
 
 | ID | Test | Phase |
 | --- | --- | --- |
-| AT1 | New session from the phone, off-network, lists `/mnt/lab` within 30 s | 1 |
+| AT1 | New session from the phone, off-network, lists `/mnt/claude-gw` within 30 s | 1 |
 | AT2 | Same from each laptop | 1 |
 | AT3 | A session reaches lab hosts | 1 |
 | AT4 | `kill -9` of the server recovers within 60 s | 2 |

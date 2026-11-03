@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Back up or roll back the claude-gw container. Run ON THE PROXMOX HOST.
-# Uses vzdump, not pct snapshot: the /mnt/lab bind mount makes pct snapshot unavailable.
+# Uses vzdump, not pct snapshot: the /mnt/claude-gw bind mount makes pct snapshot unavailable.
 # vzdump skips bind mounts, so lab data is never backed up or rolled back by this script.
 #
 #   ./snapshot.sh take  <CTID> <change-slug>      -> vzdump backup, notes pre-YYYYMMDD-HHMM-<slug>

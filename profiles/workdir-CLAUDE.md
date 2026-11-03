@@ -11,7 +11,7 @@ Rules for every session here:
    changes. The Stop hook rewrites the `## Last state` section automatically.
 3. Work on a branch in this worktree; never commit to `main` directly. Summarise the
    diff before asking for a merge.
-4. Lab resources: `/mnt/lab` is the only shared filesystem. Lab hosts are reached over
+4. Lab resources: `/mnt/claude-gw` is the only shared filesystem. Lab hosts are reached over
    SSH with the keys in `~/.ssh`; say which host you are about to change before you do.
 5. Never run anything as root here, and never touch `/etc/claude-rc` or another
    profile's home directory.
