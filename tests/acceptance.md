@@ -6,7 +6,7 @@ Result column (PASS / FAIL / SKIP + one line of evidence), commit with the tag.
 
 | ID | Test | How | Pass when | Phase | Result |
 | --- | --- | --- | --- | --- | --- |
-| AT1 | New session from phone, off-network | Claude app → Code → `home-claude-gw` card → `ls /mnt/lab` | listing within 30 s of the tap | 1 | |
+| AT1 | New session from phone, off-network | Claude app → Code → `home-claude-gw` card → `ls /mnt/claude-gw` | listing within 30 s of the tap | 1 | |
 | AT2 | Same from each laptop | claude.ai/code → same card → same prompt | as AT1 | 1 | |
 | AT3 | Session reaches lab hosts | prompt: `ssh <labhost> uptime` | real output | 1 | |
 | AT4 | Process crash recovers | in CT: `pkill -9 -u cc-home -f remote-control` | `systemctl is-active claude-rc@cc-home` back within 20 s; card online in app within 60 s | 2 | |

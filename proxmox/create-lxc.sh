@@ -62,7 +62,7 @@ pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
 mkdir -p "$LAB_SHARE"
 chgrp 101010 "$LAB_SHARE" || true
 chmod 2775 "$LAB_SHARE"
-pct set "$CTID" -mp0 "$LAB_SHARE,mp=/mnt/lab"
+pct set "$CTID" -mp0 "$LAB_SHARE,mp=/mnt/claude-gw"
 
 # Tailscale in an unprivileged LXC needs /dev/net/tun passed through.
 CONF="/etc/pve/lxc/$CTID.conf"

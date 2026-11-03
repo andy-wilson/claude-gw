@@ -24,7 +24,7 @@ This repo builds and operates the home-lab Claude Code Remote Control gateway. `
 3. The three interactive prompts (`claude auth login`, Remote Control consent, workspace trust)
    must be done by the operator at a terminal via `bootstrap/profile-login.sh`. Do not try to
    automate or bypass them.
-4. `/mnt/lab` is the only lab filesystem the gateway mounts. Do not add other bind mounts.
+4. `/mnt/claude-gw` is the only lab filesystem the gateway mounts. Do not add other bind mounts.
 5. Work in a branch; `main` moves only by merge, and tags only on `main`.
 6. If an acceptance test fails after a deploy, roll back (`make rollback`) rather than fix forward,
    unless the fix is a one-line reversible change.

@@ -2,7 +2,7 @@
 
 Always-on Claude Code **Remote Control** gateway for a home Proxmox lab. One unprivileged LXC runs `claude remote-control` in server mode per account profile, supervised by systemd + tmux, so you can start a session against your lab from the Claude mobile app or claude.ai/code anywhere, with no SSH step. Tailscale provides the fallback SSH path and ntfy.sh pushes alerts to your phone when supervision cannot recover.
 
-Sessions flow through Anthropic's relay (the gateway polls outbound), so nothing is exposed at the router. Each profile is a separate Linux user with its own `CLAUDE_CONFIG_DIR`, so two accounts never share credentials or transcripts. The only lab filesystem a session can touch is one dedicated share bind-mounted at `/mnt/lab`.
+Sessions flow through Anthropic's relay (the gateway polls outbound), so nothing is exposed at the router. Each profile is a separate Linux user with its own `CLAUDE_CONFIG_DIR`, so two accounts never share credentials or transcripts. The only lab filesystem a session can touch is one dedicated share bind-mounted at `/mnt/claude-gw`.
 
 Architecture diagrams, component design, security model, change control, definition of done and phases: [`docs/design.md`](docs/design.md).
 
@@ -19,7 +19,7 @@ Architecture diagrams, component design, security model, change control, definit
 
 - Proxmox VE 9 (tested on 9.2); 8.x should work if `pveam available` lists a `debian-13-standard` template. Root shell on the node. `proxmox/*.sh` run there; everything else runs as root inside the container.
 - A Linux bridge with DHCP (or a static IP via `IP=`/`GW=`) and outbound internet from it.
-- A dedicated directory on the host for the lab share (`LAB_SHARE`); it becomes `/mnt/lab` and is the only host path the container sees. `create-lxc.sh` sets it to group `101010` (container `cc-lab`) mode `2775`.
+- A dedicated directory on the host for the lab share (`LAB_SHARE`); it becomes `/mnt/claude-gw` and is the only host path the container sees. `create-lxc.sh` sets it to group `101010` (container `cc-lab`) mode `2775`.
 - Backup storage for `vzdump` (default `local`): `pct snapshot` is unavailable with a bind mount, so change control uses `vzdump` backups.
 - Your SSH public key in `~/.ssh/authorized_keys` on the host (or `SSH_PUBKEY=`), seeded into the container's root for first login.
 
@@ -36,7 +36,7 @@ Architecture diagrams, component design, security model, change control, definit
 | CPU / memory / swap | 2 cores, 4096 MB, 512 MB (`CORES`, `MEMORY_MB`, `SWAP_MB`) | Idle use is under 5 % CPU and 1.5 GB |
 | Disk | 32 GB on `local-lvm` (`DISK_GB`, `STORAGE`) | OS, Node, Claude Code and transcripts (`CLAUDE_CONFIG_DIR` in each profile home); session worktrees live under `WORKDIR` in the lab share |
 | Network | `eth0` on `vmbr0`, DHCP (`BRIDGE`, `IP`, `GW`) | |
-| Mount | `mp0`: `LAB_SHARE` at `/mnt/lab` | No other bind mounts |
+| Mount | `mp0`: `LAB_SHARE` at `/mnt/claude-gw` | No other bind mounts |
 | Start at boot | yes | |
 
 `bootstrap/bootstrap.sh` then installs from the internet: Debian packages (git, tmux, jq, sudo, openssh-server, make and a few more), Node 22 from NodeSource, Claude Code from npm (`latest`) and Tailscale. Outbound HTTPS is needed to `deb.debian.org`, `deb.nodesource.com`, `registry.npmjs.org`, `tailscale.com` and `pkgs.tailscale.com`, Tailscale's control and DERP servers, `claude.ai` / `api.anthropic.com` and `ntfy.sh`.
@@ -68,7 +68,7 @@ Makefile     deploy TAG=vX.Y | rollback | status | verify | rcctl | test-docker
 
 ## Bring-up (home profile)
 
-On the Proxmox host, with a dedicated directory to share with the gateway (it becomes `/mnt/lab`; nothing else on the host is mounted):
+On the Proxmox host, with a dedicated directory to share with the gateway (it becomes `/mnt/claude-gw`; nothing else on the host is mounted):
 
 ```bash
 CTID=<ctid> STORAGE=local-lvm LAB_SHARE=/<pool>/lab-share ./proxmox/create-lxc.sh
@@ -111,6 +111,7 @@ Then on the phone: Claude app → Code → the card named by `RC_NAME` (`home-cl
 | Control page (opt-in) | laptop: `make rcctl`, copy `dist/rcctl` to `/opt/claude-gw/dist/` in the container, `make deploy`. Then `cp etc/default/rcctl.example /etc/default/rcctl`, set `RCCTL_ALLOW` to your Tailscale login, `systemctl enable --now rcctl`, and open the login URL from `journalctl -u rcctl` once. Needs HTTPS certificates on in the tailnet. Page: `https://claude-gw-ctl.<tailnet>.ts.net` |
 | Tidy the alert history | Control page, Alerts: Clear history hides everything up to now (the journal keeps it); current problems stay |
 | Silence health alerts | Control page, Alerts: 1 h or 4 h. The urgent "down" alert still sends; permission-prompt notifications are not affected |
+| Move from `/mnt/lab` (before v0.7.0) | Snapshot, then host: `pct set <ctid> -mp0 <LAB_SHARE>,mp=/mnt/claude-gw` and restart the container. Inside: set `WORKDIR=/mnt/claude-gw/...` in each `/etc/claude-rc/*.env`, run `git worktree repair` in each workdir, and rename `~/.claude-<profile>/projects/-mnt-lab-*` to `-mnt-claude-gw-*` so old sessions can be resumed. Then `make deploy` |
 | Clean up session worktrees | Control page, Worktrees: Prune removes each worktree that is merged into `main`, has no changed, untracked or ignored files, and has no session in it or using it in the last 24 h, and deletes its branch |
 
 ## Alerts

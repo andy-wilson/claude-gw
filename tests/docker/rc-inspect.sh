@@ -7,12 +7,12 @@ check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails
 
 for i in 1 2 3 4 5; do apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq git jq procps >/dev/null 2>&1 && break; sleep 5; done
 install -m 0755 /r/bin/rc-inspect /usr/local/bin/
-useradd -m cc-home; mkdir -p /etc/claude-rc /mnt/lab/home; chown cc-home /mnt/lab/home
+useradd -m cc-home; mkdir -p /etc/claude-rc /mnt/claude-gw/home; chown cc-home /mnt/claude-gw/home
 # Quotes and outer spaces, as systemd's EnvironmentFile allows.
-printf 'CLAUDE_CONFIG_DIR= "/home/cc-home/.claude-cc-home"\nWORKDIR='"'"'/mnt/lab/home'"'"'  \nNTFY_TOKEN=secret\n' > /etc/claude-rc/cc-home.env
+printf 'CLAUDE_CONFIG_DIR= "/home/cc-home/.claude-cc-home"\nWORKDIR='"'"'/mnt/claude-gw/home'"'"'  \nNTFY_TOKEN=secret\n' > /etc/claude-rc/cc-home.env
 
 su -s /bin/bash cc-home -c '
-set -e; cd /mnt/lab/home; git init -q -b main; git config --global user.email t@t; git config --global user.name t
+set -e; cd /mnt/claude-gw/home; git init -q -b main; git config --global user.email t@t; git config --global user.name t
 echo x > f; echo "*.log" > .gitignore; git add .; git commit -qm seed
 for b in done dirty open busy recent ign sub; do git worktree add -q .claude/worktrees/$b -b $b; done
 git -C .claude/worktrees/done commit -q --allow-empty -m d; git merge -q done
@@ -20,8 +20,8 @@ echo y > .claude/worktrees/dirty/new
 echo y > .claude/worktrees/ign/notes.log
 git -C .claude/worktrees/open commit -q --allow-empty -m o
 git worktree add -q --detach .claude/worktrees/det
-P=~/.claude-cc-home/projects; W=/mnt/lab/home/.claude/worktrees
-mkdir -p $P/-mnt-lab-home $P/-mnt-lab-home--claude-worktrees-recent $P/-mnt-lab-home--claude-worktrees-sub-src $P/-mnt-lab-home--claude-worktrees-busy
+P=~/.claude-cc-home/projects; W=/mnt/claude-gw/home/.claude/worktrees
+mkdir -p $P/-mnt-claude-gw-home $P/-mnt-claude-gw-home--claude-worktrees-recent $P/-mnt-claude-gw-home--claude-worktrees-sub-src $P/-mnt-claude-gw-home--claude-worktrees-busy
 # A worktree session with a prompt, a reply, a tool call and a half-written last line.
 {
   echo "{\"type\":\"system\",\"timestamp\":\"2026-11-01T10:00:00Z\",\"cwd\":\"$W/recent\",\"gitBranch\":\"recent\"}"
@@ -29,17 +29,17 @@ mkdir -p $P/-mnt-lab-home $P/-mnt-lab-home--claude-worktrees-recent $P/-mnt-lab-
   echo "{\"type\":\"assistant\",\"timestamp\":\"2026-11-01T10:00:05Z\",\"cwd\":\"$W/recent\",\"gitBranch\":\"recent\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Looking at it.\"},{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"make test\"}}]}}"
   echo "{\"type\":\"user\",\"timestamp\":\"2026-11-01T10:00:09Z\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"content\":\"ok\"}]}}"
   printf "{\"type\":\"assistant\",\"mess"
-} > $P/-mnt-lab-home--claude-worktrees-recent/1111aaaa-0000-0000-0000-000000000001.jsonl
-echo "{\"type\":\"user\",\"cwd\":\"$W/sub/src\",\"message\":{\"content\":\"in a subdir\"}}" > $P/-mnt-lab-home--claude-worktrees-sub-src/2222bbbb-0000-0000-0000-000000000002.jsonl
-echo "{\"type\":\"user\",\"cwd\":\"$W/busy\",\"message\":{\"content\":\"busy one\"}}" > $P/-mnt-lab-home--claude-worktrees-busy/3333cccc-0000-0000-0000-000000000003.jsonl
-touch -d "30 minutes ago" $P/-mnt-lab-home--claude-worktrees-busy/*.jsonl
-echo "{\"type\":\"user\",\"message\":{\"content\":\"too old\"}}" > $P/-mnt-lab-home/4444dddd-0000-0000-0000-000000000004.jsonl
-touch -d "3 days ago" $P/-mnt-lab-home/*.jsonl
-for i in $(seq 40); do echo "{}" > $P/-mnt-lab-home/x$i.jsonl; done
-touch -d "1 hour ago" $P/-mnt-lab-home/x*.jsonl
+} > $P/-mnt-claude-gw-home--claude-worktrees-recent/1111aaaa-0000-0000-0000-000000000001.jsonl
+echo "{\"type\":\"user\",\"cwd\":\"$W/sub/src\",\"message\":{\"content\":\"in a subdir\"}}" > $P/-mnt-claude-gw-home--claude-worktrees-sub-src/2222bbbb-0000-0000-0000-000000000002.jsonl
+echo "{\"type\":\"user\",\"cwd\":\"$W/busy\",\"message\":{\"content\":\"busy one\"}}" > $P/-mnt-claude-gw-home--claude-worktrees-busy/3333cccc-0000-0000-0000-000000000003.jsonl
+touch -d "30 minutes ago" $P/-mnt-claude-gw-home--claude-worktrees-busy/*.jsonl
+echo "{\"type\":\"user\",\"message\":{\"content\":\"too old\"}}" > $P/-mnt-claude-gw-home/4444dddd-0000-0000-0000-000000000004.jsonl
+touch -d "3 days ago" $P/-mnt-claude-gw-home/*.jsonl
+for i in $(seq 40); do echo "{}" > $P/-mnt-claude-gw-home/x$i.jsonl; done
+touch -d "1 hour ago" $P/-mnt-claude-gw-home/x*.jsonl
 '
 # A live session process (its name contains claude) inside the busy worktree.
-su -s /bin/bash cc-home -c 'cd /mnt/lab/home/.claude/worktrees/busy && exec -a claude sleep 120' &
+su -s /bin/bash cc-home -c 'cd /mnt/claude-gw/home/.claude/worktrees/busy && exec -a claude sleep 120' &
 sleep 1
 
 out="$(rc-inspect cc-home sessions)"; rc=$?
